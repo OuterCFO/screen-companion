@@ -127,11 +127,17 @@ for (text, expected) in [
     ("have an agent check the build", "check the build"),
     ("agent: rename the screenshots", "rename the screenshots"),
     ("New task - draft the email", "draft the email"),
-    ("start a new task: plan my week", "plan my week")] {
+    ("start a new task: plan my week", "plan my week"),
+    ("Go and run an agent and tell me uh which version of Mac OS I am running and also go and tell me if I have received any new emails",
+     "tell me uh which version of Mac OS I am running and also go and tell me if I have received any new emails"),
+    ("okay so run an agent to check my disk space", "check my disk space"),
+    ("uh, start agent tell me the weather", "tell me the weather"),
+    ("can you kick off a background task that tidies my desktop", "tidies my desktop")] {
     expect(ScreenTutorRoutingPolicy.explicitAgentInstruction(text) == expected, "explicit agent request: \(text)")
 }
 for text in ["what is the agent framework on my screen?", "open the settings menu", "how do agents work in this app",
-             "start an agent", "the agent result never came back", "use the menu to start"] {
+             "start an agent", "the agent result never came back", "use the menu to start",
+             "start an agent framework", "go and open the settings"] {
     expect(ScreenTutorRoutingPolicy.explicitAgentInstruction(text) == nil, "not an agent request: \(text)")
 }
 expect(ScreenTutorRoutingPolicy.noAutomaticAgentNote.contains("start an agent to"), "no-handoff note tells the user the explicit phrase")

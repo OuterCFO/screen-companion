@@ -258,6 +258,10 @@ extension CompanionManager {
                             "autoEscalatedToAgent": true
                         ]
                     )
+                    // The answer was replaced by a background task; say so instead of leaving the bubble empty.
+                    self.beginCursorReplyPresentation()
+                    self.updateVoiceResponseCaption("<cursor_reply>Started a background task for this. Its result will appear here when it finishes.</cursor_reply>",
+                                                    force: true, updatesDock: false)
                     return
                 }
 

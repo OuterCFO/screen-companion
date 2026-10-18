@@ -1035,6 +1035,8 @@ final class CompanionManager: ObservableObject {
     var activeRequestTiming: OpenClickyRequestTiming?
     private var agentRequestTimingsBySessionID: [UUID: OpenClickyRequestTiming] = [:]
     private var agentExecutionStartDatesBySessionID: [UUID: Date] = [:]
+    /// Agent tasks started since launch; only their results are shown by the pointer, not restored older tasks.
+    private var agentSessionsStartedThisLaunch = Set<UUID>()
     /// Sessions whose terminal outcome (success, failure, cancellation) has
     /// already been narrated — so we don't re-announce on every Combine republish.
     /// Stores outcome labels like "success", "failed", "cancelled".
@@ -11601,6 +11603,7 @@ final class CompanionManager: ObservableObject {
             }
             lastVoiceAgentStartSessionID = agentSession.id
             agentExecutionStartDatesBySessionID[agentSession.id] = executionStartedAt
+            agentSessionsStartedThisLaunch.insert(agentSession.id)
             let dockItem = ClickyAgentDockItem(
                 id: dockItemID,
                 sessionID: agentSession.id,
@@ -12205,7 +12208,7 @@ final class CompanionManager: ObservableObject {
 
         // Spoken replies are muted by default and notifications can be off, so show the result by the pointer
         // unless an answer is on screen right now.
-        if currentResponseTask == nil, outcome != "cancelled" {
+        if currentResponseTask == nil, outcome != "cancelled", agentSessionsStartedThisLaunch.contains(sessionID) {
             beginCursorReplyPresentation()
             updateVoiceResponseCaption("<cursor_reply>" + line + "</cursor_reply>", force: true, updatesDock: false)
         }
@@ -12900,6 +12903,7 @@ final class CompanionManager: ObservableObject {
         )
         agentRequestTimingsBySessionID[session.id] = timing
         agentExecutionStartDatesBySessionID[session.id] = executionStartedAt
+        agentSessionsStartedThisLaunch.insert(session.id)
 
         OpenClickyMessageLogStore.shared.append(
             lane: "agent",

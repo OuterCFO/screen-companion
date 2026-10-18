@@ -12,12 +12,14 @@ nonisolated enum ScreenTutorRoutingPolicy {
     /// The compact panel stays a screen tutor, so it starts a background agent only on explicit phrasing:
     /// "start an agent to …", "have an agent …", "agent: …", or "new task: …". Returns the task instruction.
     static func explicitAgentInstruction(_ text: String) -> String? {
-        let pattern = #"^\s*(?:please\s+|can you\s+|could you\s+)?(?:(?:start|run|launch|spin up|create|use|kick off)\s+(?:an?\s+|the\s+|a\s+new\s+)?(?:background\s+)?(?:agent|task)\s*(?:to|that|and|for|:|-|,)\s*|(?:ask|have|get|let)\s+(?:an?\s+|the\s+)?agent\s+(?:to\s+)?|(?:agent|new task)\s*[:\-]\s*)(.+)$"#
+        let filler = #"(?:(?:ok(?:ay)?|so|hey|please|uh|um|go|and|now|can you|could you|would you|i want you to|i'd like you to)[\s,]+)*"#
+        let pattern = #"^\s*"# + filler + #"(?:(?:start|run|launch|spin up|create|use|kick off|send)\s+(?:an?\s+|the\s+|a\s+new\s+)?(?:background\s+)?(?:agent|task)\s*(?:to|that|and|for|:|-|,)?\s+|(?:ask|have|get|let)\s+(?:an?\s+|the\s+)?agent\s+(?:to\s+)?|(?:agent|new task)\s*[:\-]\s*)(.+)$"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
               let range = Range(match.range(at: 1), in: text) else { return nil }
         let instruction = text[range].trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ".?!")))
-        return instruction.isEmpty ? nil : instruction
+        // Require a real instruction so phrases like "start an agent framework" are not treated as tasks.
+        return instruction.split(separator: " ").count >= 2 ? instruction : nil
     }
 
     /// Added to compact-panel answers so the model never claims a handoff that did not happen.
