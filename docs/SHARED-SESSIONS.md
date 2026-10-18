@@ -100,7 +100,12 @@ A dedicated POINT line may precede or follow the cursor_reply block; quoted or f
 
 ## Mandatory response order
 
-Every OpenClicky request supplies one shared output contract: a complete POINT directive on its own first line, then the full answer, then the concise summary as the last block.
+Before its first request in a linked thread, OpenClicky registers a compact developer instruction using `thread/inject_items`, without starting an inference turn or replacing the original client's instructions.
+The output contract requires a complete POINT directive on its own first line, then the full answer, then the concise summary as the last block.
+Acknowledged registration is saved locally per thread and contract version, so reconnects and app restarts do not repeat it.
+Subsequent user messages contain only the user's text and current screenshot labels, with images attached separately.
+The contract remains model context and is not a guarantee of zero instruction tokens or perfect adherence after context compaction.
+Clearing app preferences or an uncertain registration can cause the instruction to be added again; older servers without `thread/inject_items` fail before user input is submitted.
 The cursor_reply opening and closing tags each occupy a separate line above and below that summary.
 Nothing follows the closing tag.
 If a target cannot be verified, the first directive is POINT:none; coordinates must never be invented.

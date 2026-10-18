@@ -129,10 +129,18 @@ final class CodexSharedSessionClient {
                 try await Task.sleep(for: .seconds(1))
             }
             try Task.checkCancellation()
+            if SharedCodexSessionContract.needsInstructions(threadID: threadID, defaults: .standard) {
+                // Add the presentation contract once, without replacing the original client's instructions
+                // or launching an inference turn. Older servers fail explicitly before submitting input.
+                _ = try await rpc.sendRequest(method: "thread/inject_items",
+                    params: SharedCodexSessionContract.instructionParameters(threadID: threadID), timeout: 15)
+                SharedCodexSessionContract.acknowledgeInstructions(threadID: threadID, defaults: .standard)
+            }
+            try Task.checkCancellation()
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("openclicky-shared-" + UUID().uuidString)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             imagesDirectory = directory
-            var input: [[String: Any]] = [["type": "text", "text": prompt + Self.displayHint(images: images)]]
+            var input: [[String: Any]] = [["type": "text", "text": SharedCodexSessionContract.userText(prompt, screenLabels: images.map(\.label))]]
             for (index, image) in images.enumerated() {
                 let path = directory.appendingPathComponent("screen-\(index)." + (image.data.starts(with: [0x89, 0x50, 0x4e, 0x47]) ? "png" : "jpg"))
                 try image.data.write(to: path, options: .atomic)
@@ -246,9 +254,4 @@ final class CodexSharedSessionClient {
         }
     }
 
-    private static func displayHint(images: [(data: Data, label: String)]) -> String {
-        let compactHint = "\n\n" + CursorResponseContract.instructions
-        guard !images.isEmpty else { return compactHint }
-        return "\n\n[OpenClicky display hint: screenshots are attached to this same conversation. For a relevant visible target, include [POINT:x,y:label] with x/y as screenshot pixels. Do not invent actions or targets. Screens: " + images.map(\.label).joined(separator: "; ") + "]" + compactHint
-    }
 }

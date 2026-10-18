@@ -15114,9 +15114,6 @@ final class CompanionManager: ObservableObject {
                 "model": session.model
             ]
         )
-        if isAdvancedModeEnabled {
-            notchCaptureWindowManager.showMainInterfacePanel(companionManager: self, focusedAgentSessionID: session.id)
-        }
     }
 
     func attachDroppedAgentFiles(_ urls: [URL], toAgentDockItem itemID: UUID, source: String) {

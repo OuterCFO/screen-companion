@@ -41,6 +41,21 @@ let params = SharedCodexSessionContract.turnParameters(threadID: "existing-threa
 precondition(Set(params.keys) == ["threadId", "input"])
 precondition(params["threadId"] as? String == "existing-thread")
 precondition((params["input"] as? [[String: Any]])?.count == 2)
+let instructionParams = SharedCodexSessionContract.instructionParameters(threadID: "existing-thread")
+precondition(Set(instructionParams.keys) == ["threadId", "items"])
+let instruction = (instructionParams["items"] as! [[String: Any]])[0]
+precondition(instruction["role"] as? String == "developer")
+precondition(((instruction["content"] as! [[String: Any]])[0]["text"] as? String) == SharedCodexSessionContract.responseInstructions)
+precondition(SharedCodexSessionContract.needsInstructions(threadID: "existing-thread", defaults: defaults))
+SharedCodexSessionContract.acknowledgeInstructions(threadID: "existing-thread", defaults: defaults)
+precondition(!SharedCodexSessionContract.needsInstructions(threadID: "existing-thread", defaults: defaults))
+precondition(SharedCodexSessionContract.needsInstructions(threadID: "another-thread", defaults: defaults))
+defaults.set(["existing-thread": 0], forKey: SharedCodexSessionContract.responseContractDefaultsKey)
+precondition(SharedCodexSessionContract.needsInstructions(threadID: "existing-thread", defaults: defaults))
+precondition(SharedCodexSessionContract.userText("Okay, I found it.", screenLabels: []) == "Okay, I found it.")
+let screenshotPrompt = SharedCodexSessionContract.userText("Okay, I found it.", screenLabels: ["screen0 1280x800"])
+precondition(screenshotPrompt.contains("screen0 1280x800") && !screenshotPrompt.contains("cursor_reply") && !screenshotPrompt.contains("POINT:"))
+print("PASS: separate developer contract, acknowledged registration, version migration, and compact user input")
 store.conversations[store.conversations.count - 1].boundThreadID = "existing-thread"
 store.conversations[store.conversations.count - 1].boundThreadTitle = "Codex: original"
 store.save(to: defaults)
