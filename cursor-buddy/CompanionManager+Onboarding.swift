@@ -874,4 +874,3 @@ final class OpenClickyDirectActionMemoryStore: @unchecked Sendable {
             .appendingPathComponent("direct-computer-use-shortcuts.json", isDirectory: false)
     }
 }
-
