@@ -37,6 +37,7 @@ cd "$ROOT_DIR"
 xcrun swiftc -parse \
   cursor-buddy/OpenClickyExternalControlBridge.swift \
   cursor-buddy/CompanionManager.swift \
+  cursor-buddy/CompanionManager+ExternalControl.swift \
   cursor-buddy/OverlayWindow.swift \
   cursor-buddy/CodexAgentSession.swift
 pass 'swiftc -parse changed bridge/overlay/session files'
