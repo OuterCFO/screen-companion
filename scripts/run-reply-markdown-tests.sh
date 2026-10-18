@@ -60,6 +60,18 @@ let orderedPoint = CursorPointDirective.extract(ordered)!
 precondition(orderedPoint.coordinate == CGPoint(x: 659, y: 32))
 precondition(CursorReplyPresentation(orderedPoint.spokenText).compact == "Click the top-right prompt.")
 precondition(CursorResponseContract.instructions.contains("LAST paragraph/block") && CursorResponseContract.instructions.contains("Write nothing after it."))
+let blocks = ReplyMarkdown.render("## Steps\n- Open **Mail**\n2. Click `Reply`\n> Note ==here==\n```\nlet x = **1**\n```\nDone.")
+precondition(blocks.string == "Steps\n•\tOpen Mail\n2.\tClick Reply\nNote here\nlet x = **1**\nDone.", blocks.string)
+let blockText = blocks.string as NSString
+let heading = blocks.attribute(.font, at: 0, effectiveRange: nil) as! NSFont
+precondition(heading.pointSize > 13)
+let listStyle = blocks.attribute(.paragraphStyle, at: blockText.range(of: "Open").location, effectiveRange: nil) as! NSParagraphStyle
+precondition(listStyle.headIndent > 0)
+precondition((blocks.attribute(.font, at: blockText.range(of: "let x").location, effectiveRange: nil) as! NSFont).isFixedPitch)
+precondition(blocks.attribute(.backgroundColor, at: blockText.range(of: "here").location, effectiveRange: nil) != nil)
+precondition(ReplyMarkdown.render("*Return* now").string == "Return now")
+precondition(ReplyMarkdown.render("3 + 4 = 7").string == "3 + 4 = 7")
+print("PASS: reply headings, bullet and numbered lists, quotes, and fenced code")
 print("PASS: inline screenshot regression, standalone summary recovery, quoted/fenced safety, and mandatory response order")
 print("PASS: real point-before-summary regression, metadata isolation, screen selection, and quoted-example rejection")
 print("PASS: screenshot regression, dedicated summary isolation, code examples, absent/partial summary, hard length limits, and control metadata")

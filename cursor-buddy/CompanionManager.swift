@@ -1046,7 +1046,9 @@ final class CompanionManager: ObservableObject {
     private static let processingWatchdogTimeout: TimeInterval = 30
 
     private var shortcutTransitionCancellable: AnyCancellable?
-    private var tutorDictationCancellable: AnyCancellable?
+    private var compactChordCancellable: AnyCancellable?
+    /// The app the user was in when they pressed Fn + Command; written text is pasted back into it.
+    var writeTargetApplication: NSRunningApplication?
     private var shiftDoubleTapCancellable: AnyCancellable?
     private var escapeKeyCancellable: AnyCancellable?
     private var voiceStateCancellable: AnyCancellable?
@@ -2541,7 +2543,7 @@ final class CompanionManager: ObservableObject {
         agentProgressStageCancellables.removeAll()
         agentTitleCancellables.removeAll()
         shortcutTransitionCancellable?.cancel()
-        tutorDictationCancellable?.cancel()
+        compactChordCancellable?.cancel()
         shiftDoubleTapCancellable?.cancel()
         escapeKeyCancellable?.cancel()
         stopTutorIdleObservation()
@@ -2771,9 +2773,9 @@ final class CompanionManager: ObservableObject {
     }
 
     private func bindShortcutTransitions() {
-        tutorDictationCancellable = globalPushToTalkShortcutMonitor.tutorDictationPublisher
+        compactChordCancellable = globalPushToTalkShortcutMonitor.compactChordPublisher
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] in self?.showExternalDictationInput() }
+            .sink { [weak self] mode in self?.showExternalDictationInput(mode: mode) }
 
         shortcutTransitionCancellable = globalPushToTalkShortcutMonitor
             .shortcutTransitionPublisher
@@ -6873,13 +6875,18 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    func showExternalDictationInput() {
-        showTutorInput(startDictation: true)
+    func showExternalDictationInput(mode: CompactPromptMode = .screen) {
+        // Remember the app the user was writing in before the compact panel takes focus.
+        if mode == .write {
+            let frontmost = NSWorkspace.shared.frontmostApplication
+            writeTargetApplication = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : frontmost
+        }
+        showTutorInput(startDictation: true, mode: mode)
     }
 
-    func submitTutorPrompt(_ text: String) {
+    func submitTutorPrompt(_ text: String, attachesScreen: Bool = true) {
         ensureTutorDockItem()
-        submitTextModePrompt(text, allowsAgentRouting: false)
+        submitTextModePrompt(text, allowsAgentRouting: false, attachesScreen: attachesScreen)
     }
 
     private func saveCompactConversation() {
@@ -7100,12 +7107,22 @@ final class CompanionManager: ObservableObject {
         }
         return true
     }
-    func showTutorInput(startDictation: Bool) {
+    func showTutorInput(startDictation: Bool, mode: CompactPromptMode = .screen) {
         guard hasAccessibilityPermission, hasScreenRecordingPermission else { return }
-        startPrewarmedScreenshotCaptureIfPossible()
+        if mode != .textOnly { startPrewarmedScreenshotCaptureIfPossible() }
         ensureTutorDockItem()
         NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
-        if let sessionID = compactInputAgentSessionID,
+        if mode == .write {
+            let appName = writeTargetApplication?.localizedName ?? "the current app"
+            presentCompactTask(entries: [], title: "Write for \(appName)") { [weak self] text in
+                self?.performWriteRequest(text)
+            }
+        } else if mode == .textOnly {
+            compactInputAgentSessionID = nil
+            presentCompactTask(entries: homeChatEntries, title: "Quick question · " + companionConversations.active.title) { [weak self] text in
+                self?.submitTutorPrompt(text, attachesScreen: false)
+            }
+        } else if let sessionID = compactInputAgentSessionID,
            let session = codexAgentSessions.first(where: { $0.id == sessionID }) {
             presentCompactTask(entries: session.entries, title: session.title) { [weak self] text in
                 self?.submitTextFollowUp(text, toAgentSessionID: sessionID)
@@ -7152,7 +7169,7 @@ final class CompanionManager: ObservableObject {
         submitTextModePrompt(submittedText)
     }
 
-    private func submitTextModePrompt(_ submittedText: String, allowsAgentRouting: Bool = true) {
+    private func submitTextModePrompt(_ submittedText: String, allowsAgentRouting: Bool = true, attachesScreen: Bool = true) {
         let trimmedText = submittedText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return }
 
@@ -7184,8 +7201,8 @@ final class CompanionManager: ObservableObject {
             return
         }
 
-        sendTranscriptToClaudeWithScreenshot(transcript: trimmedText, forceScreenContext: !allowsAgentRouting,
-                                             routesAgentWork: allowsAgentRouting)
+        sendTranscriptToClaudeWithScreenshot(transcript: trimmedText, forceScreenContext: !allowsAgentRouting && attachesScreen,
+                                             routesAgentWork: allowsAgentRouting, attachesScreen: attachesScreen)
     }
 
     private func submitPendingAgentVoiceFollowUp(_ transcript: String) -> Bool {
@@ -11412,7 +11429,7 @@ final class CompanionManager: ObservableObject {
             .first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
-    private func startVoiceAgentTaskPlan(
+    func startVoiceAgentTaskPlan(
         instruction: String,
         acknowledgement: String? = nil,
         route: String = "agent.start",

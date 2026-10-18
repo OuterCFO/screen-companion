@@ -27,7 +27,9 @@ extension CompanionManager {
     /// Claude's response may include a [POINT:x,y:label] tag which triggers
     /// the buddy to fly to that element on screen.
     /// `routesAgentWork` is false for compact-panel turns, which never hand work to Agent Mode by themselves.
-    func sendTranscriptToClaudeWithScreenshot(transcript: String, forceScreenContext: Bool = false, routesAgentWork: Bool = true) {
+    /// `attachesScreen` false answers from the question alone (Control + Command), skipping capture for speed.
+    func sendTranscriptToClaudeWithScreenshot(transcript: String, forceScreenContext: Bool = false, routesAgentWork: Bool = true,
+                                              attachesScreen: Bool = true) {
         rememberMainConversationUserPrompt(transcript, source: "voice_response")
         interruptCurrentVoiceResponse()
         beginCursorReplyPresentation()
@@ -105,10 +107,10 @@ extension CompanionManager {
                 // visual context. Text-only turns should not pay the capture,
                 // base64, upload, and vision-processing latency tax.
                 let captureStartedAt = Date()
-                let shouldAttachScreenContext = boundCodexThreadID != nil || forceScreenContext || circleHandoff != nil || Self.shouldAttachScreenContext(
+                let shouldAttachScreenContext = attachesScreen && (boundCodexThreadID != nil || forceScreenContext || circleHandoff != nil || Self.shouldAttachScreenContext(
                     to: transcript,
                     recentConversationHistory: historyForAPI
-                )
+                ))
                 let screenCaptures: [CompanionScreenCapture]
                 if shouldAttachScreenContext {
                     screenCaptures = try await captureAllScreensForVoiceResponseIfAvailable()
@@ -172,7 +174,7 @@ extension CompanionManager {
 
 
                 let voiceSystemPrompt = currentVoiceResponseSystemPrompt()
-                    + (routesAgentWork ? "" : "\n\n" + ScreenTutorRoutingPolicy.noAutomaticAgentNote)
+                    + (routesAgentWork ? "" : "\n\n" + ScreenTutorRoutingPolicy.agentHandoffNote)
 
                 let modelStartedAt = Date()
                 var modelResponseFields = self.voiceResponseExecutionFields(
@@ -208,7 +210,7 @@ extension CompanionManager {
                                 didDispatchStreamingPoint = true
                             }
                         }
-                        let parsedSpoken = streamed.spokenText
+                        let parsedSpoken = ScreenTutorRoutingPolicy.removingAgentHandoff(streamed.spokenText)
                         let trimmed = parsedSpoken.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !trimmed.isEmpty {
                             let now = Date()
@@ -245,6 +247,18 @@ extension CompanionManager {
                 // Parse the visual guidance tag from Claude's response.
                 let parseResult = Self.parsePointingCoordinates(from: fullResponseText)
                 let spokenText = parseResult.spokenText
+
+                // The model decided this needs a background agent.
+                if !routesAgentWork, let instruction = ScreenTutorRoutingPolicy.agentHandoffInstruction(fromAnswer: fullResponseText) {
+                    self.startVoiceAgentTaskPlan(instruction: instruction, speakAcknowledgement: false,
+                                                 voiceContextUserTranscript: transcript)
+                    await completeRequest(extra: ["handedOffToAgent": true])
+                    self.beginCursorReplyPresentation()
+                    self.updateVoiceResponseCaption(
+                        "<cursor_reply>" + ScreenTutorRoutingPolicy.handoffStartedMessage(instruction: instruction) + "</cursor_reply>",
+                        force: true, updatesDock: false)
+                    return
+                }
 
                 if self.autoEscalateVoiceResponseToAgentIfNeeded(
                     responseText: spokenText,

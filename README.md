@@ -10,6 +10,10 @@ It is independent of the commercial Clicky product and of OpenAI.
 ## What this project adds
 
 - **Command + Option** opens a focused input and starts OpenSuperWhisper.
+- **Control + Command** asks without a screenshot, for faster text-only answers.
+- **Fn + Command** writes text for the field you are in (an email reply, a form, a chat message) from the screenshot and your request, then pastes it there.
+- The model decides when a request needs a background agent; you do not have to ask for one.
+- The pointer bubble renders Markdown: emphasis, code, headings, lists, quotes, and code blocks.
 - Multiline prompts wrap and grow; longer drafts scroll.
 - New task, Tasks, and Remove task controls live in the compact panel; independent screen conversations persist across restarts.
 - Connect links a cursor task to a live shared-server Codex terminal conversation, preserving its thread, settings, and history.
@@ -67,6 +71,8 @@ You can type instead of using local dictation.
 | Action | Result |
 | --- | --- |
 | Press and release Command + Option | Open input and start local dictation |
+| Press and release Control + Command | Same, but ask without sending a screenshot |
+| Press and release Fn + Command | Write text and paste it into the field that was focused |
 | Return or Send | Submit and close the input |
 | Shift + Return | Insert a newline |
 | History or a task menu bar icon | Review that conversation in the compact panel |
@@ -74,7 +80,7 @@ You can type instead of using local dictation.
 | Tools → New Agent Task | Start a separate background task on the agent model (Codex or Claude Code) |
 
 Try: “Explain this page and point at the settings button.”
-For a separate task, use the explicit new-task command rather than expecting every screen question to become background work.
+Work that needs files, commands, or several steps starts a background agent automatically; the bubble says when it does.
 
 ## How it works
 

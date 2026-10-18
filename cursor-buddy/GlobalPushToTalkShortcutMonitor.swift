@@ -15,8 +15,9 @@ import Foundation
 final class GlobalPushToTalkShortcutMonitor: ObservableObject {
     let shortcutTransitionPublisher = PassthroughSubject<BuddyPushToTalkShortcut.ShortcutTransition, Never>()
     let shiftDoubleTapPublisher = PassthroughSubject<CGPoint, Never>()
-    let tutorDictationPublisher = PassthroughSubject<Void, Never>()
-    private var isTutorChordCandidate = false
+    /// Fires when a compact-panel chord (Command + Option, Control + Command, Fn + Command) is pressed and released.
+    let compactChordPublisher = PassthroughSubject<CompactPromptMode, Never>()
+    private var compactChordTracker = CompactPromptMode.ChordTracker()
 
     let escapeKeyPublisher = PassthroughSubject<Void, Never>()
 
@@ -139,16 +140,11 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
             return Unmanaged.passUnretained(event)
         }
 
-        if eventType == .keyDown { isTutorChordCandidate = false }
-        if eventType == .flagsChanged {
-            let modifiers = event.flags.intersection([.maskCommand, .maskAlternate, .maskControl, .maskShift])
-            if modifiers == [.maskCommand, .maskAlternate] {
-                isTutorChordCandidate = true
-            } else if isTutorChordCandidate {
-                isTutorChordCandidate = false
-                DispatchQueue.main.async { [tutorDictationPublisher] in
-                    tutorDictationPublisher.send(())
-                }
+        // Any key press during a chord makes it a normal shortcut (for example Control + Command + Space).
+        if eventType == .keyDown { compactChordTracker.keyDown() }
+        if eventType == .flagsChanged, let chord = compactChordTracker.flagsChanged(event.flags) {
+            DispatchQueue.main.async { [compactChordPublisher] in
+                compactChordPublisher.send(chord)
             }
         }
 

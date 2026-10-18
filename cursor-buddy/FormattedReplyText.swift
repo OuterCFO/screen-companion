@@ -48,36 +48,48 @@ nonisolated enum ReplyMarkdown {
         return max(18, ceil(layout.usedRect(for: container).height) + 2)
     }
 
+    private static let codeKey = NSAttributedString.Key("OpenClickyInlineCode")
+
     static func render(_ source: String) -> NSAttributedString {
-        let parsed = (try? AttributedString(markdown: source, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(source)
         let output = NSMutableAttributedString()
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 3
-        for run in parsed.runs {
-            let value = String(parsed[run.range].characters)
-            let intent = run.inlinePresentationIntent ?? []
-            var font = NSFont.systemFont(ofSize: 13)
-            var attributes: [NSAttributedString.Key: Any] = [.foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph]
-            if intent.contains(.code) {
-                font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-                attributes[.backgroundColor] = NSColor.secondaryLabelColor.withAlphaComponent(0.15)
-                attributes[NSAttributedString.Key("OpenClickyInlineCode")] = true
-            } else {
-                if intent.contains(.stronglyEmphasized) { font = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) }
-                if intent.contains(.emphasized) { font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) }
-            }
-            attributes[.font] = font
-            if intent.contains(.strikethrough) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
-            if let link = run.link { attributes[.link] = link }
-            let segment = NSAttributedString(string: value, attributes: attributes)
-            output.append(segment)
+        var plain: [String] = []
+        var fence: String?
+        func append(_ line: NSAttributedString) {
+            if output.length > 0 { output.append(NSAttributedString(string: "\n")) }
+            output.append(line)
         }
+        func flushPlain() {
+            guard !plain.isEmpty else { return }
+            append(inline(plain.joined(separator: "\n"), style: paragraphStyle()))
+            plain = []
+        }
+        for line in source.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                let marker = String(trimmed.prefix(3))
+                flushPlain()
+                if fence == marker { fence = nil } else if fence == nil { fence = marker }
+                continue
+            }
+            if fence != nil {
+                append(NSAttributedString(string: line, attributes: [
+                    .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), .foregroundColor: NSColor.labelColor,
+                    .backgroundColor: NSColor.secondaryLabelColor.withAlphaComponent(0.12),
+                    .paragraphStyle: paragraphStyle(indent: 6), codeKey: true
+                ]))
+                continue
+            }
+            guard let block = block(line) else { plain.append(line); continue }
+            flushPlain()
+            append(block)
+        }
+        flushPlain()
         // Process highlights after Markdown so nested bold/italic formatting survives.
         if let regex = try? NSRegularExpression(pattern: #"==([^=\n]+)=="#) {
             let value = output.string
             for match in regex.matches(in: value, range: NSRange(location: 0, length: output.length)).reversed() {
                 var containsCode = false
-                output.enumerateAttribute(NSAttributedString.Key("OpenClickyInlineCode"), in: match.range) { value, _, _ in
+                output.enumerateAttribute(codeKey, in: match.range) { value, _, _ in
                     if value as? Bool == true { containsCode = true }
                 }
                 guard !containsCode else { continue }
@@ -85,6 +97,69 @@ nonisolated enum ReplyMarkdown {
                 output.deleteCharacters(in: NSRange(location: NSMaxRange(match.range) - 2, length: 2))
                 output.deleteCharacters(in: NSRange(location: match.range.location, length: 2))
             }
+        }
+        return output
+    }
+
+    /// Headings, list items, and quotes; nil for ordinary paragraph text.
+    private static func block(_ line: String) -> NSAttributedString? {
+        let ns = line as NSString
+        func match(_ pattern: String) -> NSTextCheckingResult? {
+            (try? NSRegularExpression(pattern: pattern))?.firstMatch(in: line, range: NSRange(location: 0, length: ns.length))
+        }
+        if let m = match(#"^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$"#) {
+            let size: CGFloat = m.range(at: 1).length <= 2 ? 15 : 14
+            return inline(ns.substring(with: m.range(at: 2)), style: paragraphStyle(), size: size, bold: true)
+        }
+        if let m = match(#"^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$"#) {
+            let level = CGFloat(min(3, m.range(at: 1).length / 2))
+            let marker = ns.substring(with: m.range(at: 2))
+            let label = marker.first?.isNumber == true ? String(marker.dropLast()) + "." : "•"
+            let indent = 16 + level * 14
+            let style = paragraphStyle(indent: indent)
+            style.firstLineHeadIndent = indent - 16
+            style.tabStops = [NSTextTab(textAlignment: .left, location: indent)]
+            let item = NSMutableAttributedString(string: label + "\t", attributes: [
+                .font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: style
+            ])
+            item.append(inline(ns.substring(with: m.range(at: 3)), style: style))
+            return item
+        }
+        if let m = match(#"^\s{0,3}>\s?(.*)$"#) {
+            return inline(ns.substring(with: m.range(at: 1)), style: paragraphStyle(indent: 10), color: .secondaryLabelColor)
+        }
+        return nil
+    }
+
+    private static func paragraphStyle(indent: CGFloat = 0) -> NSMutableParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = 3
+        style.firstLineHeadIndent = indent
+        style.headIndent = indent
+        return style
+    }
+
+    private static func inline(_ source: String, style: NSParagraphStyle, size: CGFloat = 13, bold: Bool = false,
+                               color: NSColor = .labelColor) -> NSAttributedString {
+        let parsed = (try? AttributedString(markdown: source, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(source)
+        let output = NSMutableAttributedString()
+        for run in parsed.runs {
+            let value = String(parsed[run.range].characters)
+            let intent = run.inlinePresentationIntent ?? []
+            var font = NSFont.systemFont(ofSize: size, weight: bold ? .semibold : .regular)
+            var attributes: [NSAttributedString.Key: Any] = [.foregroundColor: color, .paragraphStyle: style]
+            if intent.contains(.code) {
+                font = NSFont.monospacedSystemFont(ofSize: size - 1, weight: .regular)
+                attributes[.backgroundColor] = NSColor.secondaryLabelColor.withAlphaComponent(0.15)
+                attributes[codeKey] = true
+            } else {
+                if intent.contains(.stronglyEmphasized) { font = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) }
+                if intent.contains(.emphasized) { font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) }
+            }
+            attributes[.font] = font
+            if intent.contains(.strikethrough) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+            if let link = run.link { attributes[.link] = link }
+            output.append(NSAttributedString(string: value, attributes: attributes))
         }
         return output
     }

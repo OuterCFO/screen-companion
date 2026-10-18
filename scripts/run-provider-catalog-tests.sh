@@ -140,7 +140,14 @@ for text in ["what is the agent framework on my screen?", "open the settings men
              "start an agent framework", "go and open the settings"] {
     expect(ScreenTutorRoutingPolicy.explicitAgentInstruction(text) == nil, "not an agent request: \(text)")
 }
-expect(ScreenTutorRoutingPolicy.noAutomaticAgentNote.contains("start an agent to"), "no-handoff note tells the user the explicit phrase")
+expect(ScreenTutorRoutingPolicy.agentHandoffNote.contains("[AGENT:"), "handoff note teaches the directive")
+let handoffAnswer = "[POINT:none]\n[AGENT: Check the macOS version and count today's unread emails]\n<cursor_reply>\nStarted a background task.\n</cursor_reply>"
+expect(ScreenTutorRoutingPolicy.agentHandoffInstruction(fromAnswer: handoffAnswer) == "Check the macOS version and count today's unread emails", "handoff instruction parsed after POINT")
+expect(ScreenTutorRoutingPolicy.agentHandoffInstruction(fromAnswer: "[POINT:none]\nYou're on macOS 27.") == nil, "plain answers do not hand off")
+expect(ScreenTutorRoutingPolicy.agentHandoffInstruction(fromAnswer: "```\n[AGENT: example only here]\n```") == nil, "fenced examples are ignored")
+expect(ScreenTutorRoutingPolicy.agentHandoffInstruction(fromAnswer: "[AGENT: go]") == nil, "one-word instructions are rejected")
+expect(!ScreenTutorRoutingPolicy.removingAgentHandoff("Sure\n[AGENT: partial dire").contains("AGENT"), "streaming directive is hidden")
+expect(ScreenTutorRoutingPolicy.handoffStartedMessage(instruction: String(repeating: "word ", count: 40)).contains("…"), "long instructions are shortened")
 var visibility = ReplyVisibilityPolicy()
 expect(visibility.canPresent, "new reply can present")
 visibility.dismiss()

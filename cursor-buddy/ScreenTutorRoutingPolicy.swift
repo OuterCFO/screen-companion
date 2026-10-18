@@ -22,8 +22,35 @@ nonisolated enum ScreenTutorRoutingPolicy {
         return instruction.split(separator: " ").count >= 2 ? instruction : nil
     }
 
-    /// Added to compact-panel answers so the model never claims a handoff that did not happen.
-    static let noAutomaticAgentNote = """
-    THIS TURN CANNOT START BACKGROUND WORK: nothing you say starts Agent Mode or any other task. Never say you started, launched, queued, or handed off an agent or task. Answer directly from the screen and your knowledge. If the request needs background work such as files, code, commands, or live research, say that the user can type "start an agent to" followed by the task.
+    /// Added to compact-panel answers: the model decides when a request needs a background agent.
+    static let agentHandoffNote = """
+    BACKGROUND TASKS: You answer from the screen and the conversation. When the request needs real work you cannot do in this reply, such as reading or changing files, running commands, checking email, calendar, or messages, live web research, or multi-step work in apps, hand it to a background agent instead of answering or refusing.
+    To hand off, put one line exactly [AGENT: <a complete, self-contained task instruction>] right after the POINT line, then only a cursor_reply block saying you started it. OpenClicky starts the agent and shows its result later.
+    Never claim you started, ran, or checked something without this line. Do not hand off questions you can answer from the screen or your knowledge.
     """
+
+    /// The task instruction from a top-level `[AGENT: ...]` line, ignoring quoted or fenced examples.
+    static func agentHandoffInstruction(fromAnswer answer: String) -> String? {
+        var insideFence = false
+        for line in answer.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") { insideFence.toggle(); continue }
+            guard !insideFence, trimmed.hasPrefix("[AGENT:"), trimmed.hasSuffix("]") else { continue }
+            let instruction = trimmed.dropFirst("[AGENT:".count).dropLast().trimmingCharacters(in: .whitespacesAndNewlines)
+            return instruction.split(separator: " ").count >= 2 ? instruction : nil
+        }
+        return nil
+    }
+
+    /// Hides a handoff directive (complete or still streaming) from the visible reply.
+    static func removingAgentHandoff(_ text: String) -> String {
+        text.components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("[AGENT") }
+            .joined(separator: "\n")
+    }
+
+    static func handoffStartedMessage(instruction: String) -> String {
+        let brief = instruction.count > 90 ? String(instruction.prefix(87)) + "…" : instruction
+        return "Started a background task: \(brief) Its result will appear here when it finishes."
+    }
 }
