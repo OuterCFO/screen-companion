@@ -121,6 +121,22 @@ let negative = ReplyBubblePlacement.origin(anchor: CGPoint(x: -990, y: -195), si
 expect(negative.x >= negativeDisplay.minX && negative.y >= negativeDisplay.minY, "reply respects negative-origin display")
 expect(ScreenTutorRoutingPolicy.shouldStayInTutor("Point to the heading on my screen"), "screen pointing remains a direct answer")
 expect(!ScreenTutorRoutingPolicy.shouldStayInTutor("Run an agent to delete the page"), "explicit agent work keeps its route")
+for (text, expected) in [
+    ("start an agent to tell me which macOS version I'm running", "tell me which macOS version I'm running"),
+    ("Start an agent to tell me which macOS version I'm running.", "tell me which macOS version I'm running"),
+    ("please run a background agent that cleans my Downloads folder", "cleans my Downloads folder"),
+    ("can you spin up an agent to summarize the logs?", "summarize the logs"),
+    ("have an agent check the build", "check the build"),
+    ("agent: rename the screenshots", "rename the screenshots"),
+    ("New task - draft the email", "draft the email"),
+    ("start a new task: plan my week", "plan my week")] {
+    expect(ScreenTutorRoutingPolicy.explicitAgentInstruction(text) == expected, "explicit agent request: \(text)")
+}
+for text in ["what is the agent framework on my screen?", "open the settings menu", "how do agents work in this app",
+             "start an agent", "the agent result never came back", "use the menu to start"] {
+    expect(ScreenTutorRoutingPolicy.explicitAgentInstruction(text) == nil, "not an agent request: \(text)")
+}
+expect(ScreenTutorRoutingPolicy.noAutomaticAgentNote.contains("start an agent to"), "no-handoff note tells the user the explicit phrase")
 var visibility = ReplyVisibilityPolicy()
 expect(visibility.canPresent, "new reply can present")
 visibility.dismiss()

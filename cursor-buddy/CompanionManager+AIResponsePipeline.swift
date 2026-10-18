@@ -27,7 +27,8 @@ extension CompanionManager {
     /// the spinner/processing state until TTS audio begins playing.
     /// Claude's response may include a [POINT:x,y:label] tag which triggers
     /// the buddy to fly to that element on screen.
-    func sendTranscriptToClaudeWithScreenshot(transcript: String, forceScreenContext: Bool = false) {
+    /// `routesAgentWork` is false for compact-panel turns, which never hand work to Agent Mode by themselves.
+    func sendTranscriptToClaudeWithScreenshot(transcript: String, forceScreenContext: Bool = false, routesAgentWork: Bool = true) {
         rememberMainConversationUserPrompt(transcript, source: "voice_response")
         interruptCurrentVoiceResponse()
         beginCursorReplyPresentation()
@@ -294,6 +295,7 @@ extension CompanionManager {
                     : nil
                 let voiceSystemPrompt: String = {
                     let base = currentVoiceResponseSystemPrompt()
+                        + (routesAgentWork ? "" : "\n\n" + ScreenTutorRoutingPolicy.noAutomaticAgentNote)
                     guard let chosenFiller else { return base }
                     return base + """
 

@@ -8929,6 +8929,15 @@ final class CompanionManager: ObservableObject {
         interruptCurrentVoiceResponse()
         clearDetectedElementLocation()
 
+        // The compact panel skips the broad router but still honors an explicit request for an agent.
+        if !allowsAgentRouting, let instruction = ScreenTutorRoutingPolicy.explicitAgentInstruction(trimmedText) {
+            startVoiceAgentTaskPlan(instruction: instruction, voiceContextUserTranscript: trimmedText)
+            beginCursorReplyPresentation()
+            updateVoiceResponseCaption("<cursor_reply>Started a background task. Its result will appear here when it finishes.</cursor_reply>",
+                                       force: true, updatesDock: false)
+            return
+        }
+
         if allowsAgentRouting, routeFinalVoiceTranscriptActionIfNeeded(
             trimmedText,
             source: "text",
@@ -8939,7 +8948,8 @@ final class CompanionManager: ObservableObject {
             return
         }
 
-        sendTranscriptToClaudeWithScreenshot(transcript: trimmedText, forceScreenContext: !allowsAgentRouting)
+        sendTranscriptToClaudeWithScreenshot(transcript: trimmedText, forceScreenContext: !allowsAgentRouting,
+                                             routesAgentWork: allowsAgentRouting)
     }
 
     private func submitPendingAgentVoiceFollowUp(_ transcript: String) -> Bool {
@@ -14471,15 +14481,15 @@ final class CompanionManager: ObservableObject {
         case "cancelled":
             line = trimmedSummary.isEmpty
                 ? "\(taskTitle) was cancelled"
-                : "\(taskTitle) was cancelled \(Self.briefCompletionSummary(trimmedSummary))"
+                : "\(taskTitle) was cancelled: \(Self.briefCompletionSummary(trimmedSummary))"
         case "failed":
             line = trimmedSummary.isEmpty
                 ? "\(taskTitle) stopped"
-                : "\(taskTitle) stopped \(Self.briefCompletionSummary(trimmedSummary))"
+                : "\(taskTitle) stopped: \(Self.briefCompletionSummary(trimmedSummary))"
         default:
             line = trimmedSummary.isEmpty
                 ? "\(taskTitle) is done"
-                : "\(taskTitle) is done \(Self.briefCompletionSummary(trimmedSummary))"
+                : "\(taskTitle) is done: \(Self.briefCompletionSummary(trimmedSummary))"
         }
 
         let notificationTitle: String
@@ -14499,6 +14509,13 @@ final class CompanionManager: ObservableObject {
                 "outcome": outcome
             ]
         )
+
+        // Spoken replies are muted by default and notifications can be off, so show the result by the pointer
+        // unless an answer is on screen right now.
+        if currentResponseTask == nil, outcome != "cancelled" {
+            beginCursorReplyPresentation()
+            updateVoiceResponseCaption("<cursor_reply>" + line + "</cursor_reply>", force: true, updatesDock: false)
+        }
 
         guard AppBundleConfiguration.agentCompletionVoiceEnabled() else { return }
 
