@@ -66,6 +66,10 @@ expect(OpenClickyModelCatalog.computerUseModel(withID: "opus-5").id == "claude-o
 expect(OpenClickyModelCatalog.delegationModel(withID: nil).id == "claude-sonnet-5-5", "delegation default is a real ID")
 expect(OpenClickyModelCatalog.defaultAnthropicResponseModelID == "claude-sonnet-5-5", "Claude default is on every plan")
 expect(OpenClickyModelCatalog.voiceResponseModel(withID: "claude-fable-5-1").id == "claude-fable-5-1", "Fable stays selectable")
+expect(OpenClickyModelCatalog.agentModel(withID: "claude-opus-5-5").provider == .anthropic, "Claude agent models resolve")
+expect(OpenClickyModelCatalog.agentModel(withID: "gpt-6-luna").id == "gpt-6-luna", "Codex agent models resolve")
+expect(OpenClickyModelCatalog.codexActionsModel(withID: "claude-opus-5-5").id == OpenClickyModelCatalog.defaultCodexActionsModelID, "Codex config never receives a Claude model")
+expect(!OpenClickyModelCatalog.codexActionsModels.contains { $0.provider == .anthropic }, "Codex model list stays Codex-only")
 
 // --- Catalog family mapping ---
 let apple = OpenClickyModelCatalog.voiceResponseModel(withID: OpenClickyModelCatalog.appleFoundationModelID)

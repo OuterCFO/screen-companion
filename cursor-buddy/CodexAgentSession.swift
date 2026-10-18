@@ -245,7 +245,7 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
     @Published private(set) var activityStatusLines: [String] = []
     @Published private(set) var queuedFollowUpPrompts: [String] = []
     @Published private(set) var wasRestoredAfterRelaunch = false
-    @Published var model: String = OpenClickyModelCatalog.codexActionsModel(
+    @Published var model: String = OpenClickyModelCatalog.agentModel(
         withID: UserDefaults.standard.string(forKey: "clickyCodexModel") ?? OpenClickyModelCatalog.defaultCodexActionsModelID
     ).id
     /// Optional specialist-agent system context (soul/instructions/memory)
@@ -260,6 +260,8 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
     /// restricted execution policy as defense in depth if future context is
     /// added to that handoff.
     var usesRestrictedExecutionPolicy = false
+    private var claudeProcess: ClaudeCodeCLITurnProcess?
+    private var claudeParser = ClaudeCodeAgentProtocol.Parser()
     var onOpenableFileFound: (@MainActor (URL) -> Void)?
 
     private var executionApprovalPolicy: String {
@@ -467,6 +469,8 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
     }
 
     func warmUp() {
+        // Claude Code starts per turn and needs no warm thread.
+        guard !usesClaudeCode else { return }
         warmUpTask?.cancel()
         let generation = runGeneration
         warmUpTask = Task { [weak self] in
@@ -665,11 +669,11 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
     }
 
     func setModel(_ model: String) {
-        let resolvedModel = OpenClickyModelCatalog.codexActionsModel(withID: model).id
+        let resolvedModel = OpenClickyModelCatalog.agentModel(withID: model).id
         guard self.model != resolvedModel else { return }
         applyModel(resolvedModel)
 
-        if processManager.isRunning || promptStartTask != nil || warmUpTask != nil {
+        if processManager.isRunning || claudeProcess != nil || promptStartTask != nil || warmUpTask != nil {
             stop(reason: "model_changed")
         }
     }
@@ -698,6 +702,8 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
         pendingAssistantDeltas.removeAll()
         stopReason = reason
         processManager.stop()
+        claudeProcess?.terminate()
+        claudeProcess = nil
         hasInitializedProcess = false
         activeThreadID = nil
         currentAssistantEntryID = nil
@@ -708,6 +714,12 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
     }
 
     private func runPrompt(_ prompt: String, generation: UInt64, screenContext: CodexAgentScreenContext? = nil, didRetryCompatibilityFallback: Bool = false) async {
+        if usesClaudeCode {
+            await runClaudeCodePrompt(prompt, generation: generation, screenContext: screenContext)
+            return
+        }
+        // A Claude Code session ID cannot be resumed by Codex.
+        if activeThreadID.map(ClaudeCodeCLIProtocol.isLinkedThreadID) == true { activeThreadID = nil }
         do {
             try requireCurrentRun(generation)
             try await ensureThread(for: generation)
@@ -778,9 +790,84 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
         }
     }
 
+    /// Agent tasks on a Claude model run in the user's signed-in Claude Code CLI instead of Codex.
+    var usesClaudeCode: Bool { ClaudeCodeAgentProtocol.isClaudeAgentModel(model) }
+
+    private func runClaudeCodePrompt(_ prompt: String, generation: UInt64, screenContext: CodexAgentScreenContext?) async {
+        do {
+            try requireCurrentRun(generation)
+            guard let executable = ClaudeCodeCLIProtocol.findExecutable() else {
+                throw ClaudeCodeCLIProtocol.error("Claude Code is not installed. Install it and sign in with claude, or choose a Codex model for agent tasks.")
+            }
+            stopReason = nil
+            status = .running
+            progressStage = .starting
+            lastErrorMessage = nil
+            UserDefaults.standard.set(model, forKey: "clickyCodexModel")
+            if !usesRestrictedExecutionPolicy {
+                UserDefaults.standard.set(workingDirectoryPath, forKey: "clickyCodexWorkingDirectory")
+            }
+            let images = (screenContext?.attachments ?? []).compactMap { attachment in
+                (try? Data(contentsOf: attachment.fileURL)).map { (data: $0, label: attachment.label) }
+            }
+            let message = try ClaudeCodeCLIProtocol.userMessageLine(textBlocks: [prompt], images: images)
+            let resumeID = activeThreadID.flatMap(ClaudeCodeCLIProtocol.sessionID(fromLinkedThreadID:))
+            let process = try ClaudeCodeCLITurnProcess(
+                executable: executable,
+                arguments: ClaudeCodeAgentProtocol.arguments(model: model, resumeSessionID: resumeID,
+                                                             restricted: usesRestrictedExecutionPolicy),
+                workingDirectory: URL(fileURLWithPath: workingDirectoryPath, isDirectory: true),
+                environment: ClaudeCodeCLIProtocol.environment(base: ProcessInfo.processInfo.environment, executable: executable,
+                                                               maxOutputTokens: nil, customBaseURL: nil, customAPIKey: nil))
+            claudeProcess = process
+            claudeParser = ClaudeCodeAgentProtocol.Parser()
+            process.onLine = { [weak self] line in self?.handleClaudeCodeLine(line, generation: generation) }
+            _ = try await process.run(message: message, timeout: Self.claudeCodeTurnTimeout) { _ in }
+        } catch is CancellationError {
+            return
+        } catch {
+            // A failed result was already reported from the stream.
+            guard isCurrentRun(generation), !claudeParser.isFinished else { return }
+            failTurn(Self.userFacingErrorMessage(from: error.localizedDescription))
+        }
+    }
+
+    private static let claudeCodeTurnTimeout: Duration = .seconds(3600)
+
+    private func handleClaudeCodeLine(_ line: String, generation: UInt64) {
+        guard isCurrentRun(generation) else { return }
+        for event in claudeParser.consume(line: line) {
+            switch event {
+            case .sessionStarted(let sessionID):
+                activeThreadID = ClaudeCodeCLIProtocol.linkedThreadID(sessionID: sessionID)
+                status = .running
+            case .textDelta(let messageID, let text):
+                if progressStage != .composing {
+                    progressStage = .composing
+                    appendActivityStatusLine("Writing the response")
+                }
+                appendAssistantDelta(itemID: messageID, delta: text)
+            case .toolStarted(let toolID, let summary, let isCommand, let planText):
+                progressStage = planText == nil ? .executing : .planning
+                appendActivityStatusLine(summary)
+                if let planText { upsertEntry(id: toolID, role: .plan, text: planText) }
+                else if isCommand { upsertEntry(id: toolID, role: .command, text: summary) }
+            case .messageText(let messageID, let text):
+                completeAgentMessage(id: messageID, text: text)
+            case .turnCompleted:
+                claudeProcess = nil
+                completeTurn()
+            case .turnFailed(let message):
+                claudeProcess = nil
+                failTurn(Self.userFacingErrorMessage(from: message))
+            }
+        }
+    }
+
     private func applyModel(_ resolvedModel: String) {
         model = resolvedModel
-        homeManager.model = resolvedModel
+        // Codex config only ever receives Codex models.
+        homeManager.model = OpenClickyModelCatalog.codexActionsModel(withID: resolvedModel).id
         UserDefaults.standard.set(resolvedModel, forKey: "clickyCodexModel")
     }
 
@@ -1069,30 +1156,11 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
                 text: summary
             )
         case "turn/completed":
-            flushPendingAssistantDeltas()
-            currentAssistantEntryID = nil
-            status = .ready
-            progressStage = .completed
-            persistCompletedTurnMemoryIfNeeded()
-            Task { await OpenClickyAgentFileLeaseCoordinator.shared.releaseLeases(for: id) }
-            currentLeasePaths = []
-            if !queuedFollowUpPrompts.isEmpty {
-                let nextPrompt = queuedFollowUpPrompts.removeFirst()
-                startPromptTurn(nextPrompt, screenContext: nil)
-            }
-            // Chime intentionally NOT played here. CompanionManager owns
-            // the audio choreography and plays the chime *after* any
-            // in-flight TTS finishes, so the chime can't cut the
-            // acknowledgement speech. See `playAgentDoneChimeAfterCurrentTTS`.
+            completeTurn()
         case "error":
-            let text = Self.userFacingErrorMessage(
+            failTurn(Self.userFacingErrorMessage(
                 from: Self.notificationErrorMessage(from: params) ?? "Codex app-server emitted an error."
-            )
-            lastErrorMessage = text
-            status = .failed(text)
-            progressStage = .failed
-            entries.append(CodexTranscriptEntry(role: .system, text: text))
-            appendActivityStatusLine("Stopped: \(Self.spokenSnippet(from: text, maxLength: 100))")
+            ))
         case "account/login/completed":
             if CodexJSON.bool(params["success"]) == true {
                 entries.append(CodexTranscriptEntry(role: .system, text: "Codex ChatGPT sign-in completed. Start the Agent task again."))
@@ -1105,6 +1173,75 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
         default:
             break
         }
+    }
+
+    /// Records a finished assistant message: transcript entry, response card, task title, and found files.
+    private func completeAgentMessage(id: String, text: String) {
+        flushPendingAssistantDeltas(for: id)
+        appendActivityStatusLine("Finished writing the response")
+        if !text.isEmpty {
+            let parsed = Self.extractTaskTitleMetadata(from: text)
+            if let taskTitle = parsed.taskTitle {
+                title = taskTitle
+            }
+            let visibleText = parsed.visibleText
+            if !visibleText.isEmpty {
+                latestAssistantResponseForCompletedTurn = visibleText
+                upsertEntry(id: id, role: .assistant, text: visibleText)
+                OpenClickyMessageLogStore.shared.appendConversationTurn(
+                    lane: "agent",
+                    direction: "outgoing",
+                    role: "assistant",
+                    text: visibleText,
+                    source: "codex_agent_session",
+                    sessionID: self.id.uuidString,
+                    title: title,
+                    extraFields: [
+                        "model": model,
+                        "workingDirectory": workingDirectoryPath,
+                        "itemID": id,
+                        "taskTitleMetadata": parsed.taskTitle ?? ""
+                    ]
+                )
+                latestResponseCard = ClickyResponseCard(
+                    source: .agent,
+                    rawText: Self.userFacingAgentMessage(from: visibleText),
+                    contextTitle: lastSubmittedPrompt
+                )
+                if let fileURL = Self.firstOpenableFileURL(in: visibleText) {
+                    onOpenableFileFound?(fileURL)
+                }
+            }
+        }
+        currentAssistantEntryID = nil
+    }
+
+    private func completeTurn() {
+        flushPendingAssistantDeltas()
+        currentAssistantEntryID = nil
+        status = .ready
+        progressStage = .completed
+        persistCompletedTurnMemoryIfNeeded()
+        Task { await OpenClickyAgentFileLeaseCoordinator.shared.releaseLeases(for: id) }
+        currentLeasePaths = []
+        if !queuedFollowUpPrompts.isEmpty {
+            let nextPrompt = queuedFollowUpPrompts.removeFirst()
+            startPromptTurn(nextPrompt, screenContext: nil)
+        }
+        // Chime intentionally NOT played here. CompanionManager owns
+        // the audio choreography and plays the chime *after* any
+        // in-flight TTS finishes, so the chime can't cut the
+        // acknowledgement speech. See `playAgentDoneChimeAfterCurrentTTS`.
+    }
+
+    private func failTurn(_ text: String) {
+        flushPendingAssistantDeltas()
+        lastErrorMessage = text
+        status = .failed(text)
+        progressStage = .failed
+        entries.append(CodexTranscriptEntry(role: .system, text: text))
+        appendActivityStatusLine("Stopped: \(Self.spokenSnippet(from: text, maxLength: 100))")
+        Task { await OpenClickyAgentFileLeaseCoordinator.shared.releaseLeases(for: id) }
     }
 
     private static func notificationErrorMessage(from params: [String: Any]) -> String? {
@@ -1236,44 +1373,7 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
 
         switch type {
         case "agentMessage":
-            flushPendingAssistantDeltas(for: id)
-            appendActivityStatusLine("Finished writing the response")
-            let text = CodexJSON.string(item["text"]) ?? ""
-            if !text.isEmpty {
-                let parsed = Self.extractTaskTitleMetadata(from: text)
-                if let taskTitle = parsed.taskTitle {
-                    title = taskTitle
-                }
-                let visibleText = parsed.visibleText
-                if !visibleText.isEmpty {
-                    latestAssistantResponseForCompletedTurn = visibleText
-                    upsertEntry(id: id, role: .assistant, text: visibleText)
-                    OpenClickyMessageLogStore.shared.appendConversationTurn(
-                        lane: "agent",
-                        direction: "outgoing",
-                        role: "assistant",
-                        text: visibleText,
-                        source: "codex_agent_session",
-                        sessionID: self.id.uuidString,
-                        title: title,
-                        extraFields: [
-                            "model": model,
-                            "workingDirectory": workingDirectoryPath,
-                            "itemID": id,
-                            "taskTitleMetadata": parsed.taskTitle ?? ""
-                        ]
-                    )
-                    latestResponseCard = ClickyResponseCard(
-                        source: .agent,
-                        rawText: Self.userFacingAgentMessage(from: visibleText),
-                        contextTitle: lastSubmittedPrompt
-                    )
-                    if let fileURL = Self.firstOpenableFileURL(in: visibleText) {
-                        onOpenableFileFound?(fileURL)
-                    }
-                }
-            }
-            currentAssistantEntryID = nil
+            completeAgentMessage(id: id, text: CodexJSON.string(item["text"]) ?? "")
         case "plan":
             if let text = CodexJSON.string(item["text"]), !text.isEmpty {
                 appendActivityStatusLine("Planned: \(Self.spokenSnippet(from: text, maxLength: 100))")

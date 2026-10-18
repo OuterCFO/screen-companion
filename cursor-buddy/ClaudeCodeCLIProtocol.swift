@@ -17,6 +17,8 @@ nonisolated enum ClaudeCodeCLIProtocol {
 
     static func isValidSessionID(_ id: String) -> Bool { UUID(uuidString: id) != nil }
 
+    static func isLinkedThreadID(_ threadID: String) -> Bool { threadID.hasPrefix(linkedSessionPrefix) }
+
     static func error(_ message: String) -> NSError {
         NSError(domain: "ClaudeCodeCLI", code: -30, userInfo: [NSLocalizedDescriptionKey: message])
     }

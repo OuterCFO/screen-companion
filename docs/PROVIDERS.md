@@ -14,6 +14,9 @@ Cancellation never falls through, so an interrupted answer cannot start a paid f
 
 Realtime speech models and the Deepgram voice agent are speech-to-speech paths outside the registry.
 
+Background agent tasks follow the agent model: GPT models run in the bundled Codex runtime, and Claude models run in the Claude Code CLI.
+See [Claude Code](CLAUDE-CODE.md#background-agent-tasks).
+
 ## Money rule
 
 Registration rejects a chain where a per-token provider comes before a free or plan provider.

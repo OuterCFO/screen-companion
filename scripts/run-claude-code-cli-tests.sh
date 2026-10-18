@@ -121,8 +121,53 @@ precondition(owners == ["a": "busy", "b": "running"])
 precondition(P.configDirectory(home: "/Users/u", environment: [:]).path == "/Users/u/.claude")
 precondition(P.configDirectory(home: "/Users/u", environment: ["CLAUDE_CONFIG_DIR": "/tmp/cfg"]).path == "/tmp/cfg")
 print("PASS: live-owner registry and config directory")
+
+// Background agent turns
+typealias A = ClaudeCodeAgentProtocol
+let agentArgs = A.arguments(model: "claude-sonnet-5-5", resumeSessionID: id, restricted: false)
+precondition(value(agentArgs, "--permission-mode") == "auto" && value(agentArgs, "--resume") == id && value(agentArgs, "--model") == "claude-sonnet-5-5")
+precondition(value(agentArgs, "--disallowedTools") == "Bash(xcodebuild:*)" && !agentArgs.contains("--setting-sources"))
+let restricted = A.arguments(model: "claude-opus-5-5", resumeSessionID: "019a-codex-thread", restricted: true)
+precondition(value(restricted, "--permission-mode") == "acceptEdits" && !restricted.contains("--resume"))
+precondition(A.isClaudeAgentModel("claude-sonnet-5-5") && !A.isClaudeAgentModel("gpt-6-luna"))
+precondition(P.isLinkedThreadID(P.linkedThreadID(sessionID: id)) && !P.isLinkedThreadID(id))
+print("PASS: agent arguments, permission modes, resume, and xcodebuild block")
+
+// Recorded shape of a real agent turn: text, a shell tool call, a todo list, the final message, and the result
+var agent = A.Parser()
+var agentEvents: [ClaudeCodeAgentEvent] = []
+let messageStart = { (mid: String) in json(["type": "stream_event", "event": ["type": "message_start", "message": ["id": mid]]]) }
+for raw in [json(["type": "system", "subtype": "init", "session_id": id]),
+            messageStart("m1"), delta("Checking."),
+            json(["type": "assistant", "message": ["id": "m1", "content": [["type": "text", "text": "Checking."]]]]),
+            json(["type": "assistant", "message": ["id": "m1", "content": [["type": "tool_use", "id": "t1", "name": "Bash",
+                  "input": ["command": "echo hi > hello.txt", "description": "Create hello.txt"]]]]]),
+            json(["type": "assistant", "message": ["id": "m1", "content": [["type": "tool_use", "id": "t1", "name": "Bash", "input": [:]]]]]),
+            json(["type": "assistant", "message": ["id": "m1", "content": [["type": "tool_use", "id": "t2", "name": "TodoWrite",
+                  "input": ["todos": [["content": "Write file", "status": "completed"], ["content": "Report", "status": "pending"]]]]]]]),
+            json(["type": "user", "message": ["content": [["type": "tool_result", "tool_use_id": "t1", "content": ""]]]]),
+            messageStart("m2"), delta("Done."),
+            json(["type": "assistant", "message": ["id": "m2", "content": [["type": "text", "text": "Done.\n\nTASK_TITLE: Hello File"]]]]),
+            json(["type": "result", "subtype": "success", "is_error": false, "result": "Done.\n\nTASK_TITLE: Hello File"]),
+            delta("late")] {
+    agentEvents += agent.consume(line: raw)
+}
+precondition(agentEvents == [
+    .sessionStarted(id: id), .textDelta(messageID: "m1", text: "Checking."), .messageText(messageID: "m1", text: "Checking."),
+    .toolStarted(id: "t1", summary: "Create hello.txt", isCommand: true, planText: nil),
+    .toolStarted(id: "t2", summary: "Planning next steps", isCommand: false, planText: "[x] Write file\n[ ] Report"),
+    .textDelta(messageID: "m2", text: "Done."), .messageText(messageID: "m2", text: "Done.\n\nTASK_TITLE: Hello File"),
+    .turnCompleted(result: "Done.\n\nTASK_TITLE: Hello File")])
+var failedAgent = A.Parser()
+precondition(failedAgent.consume(line: json(["type": "result", "is_error": true, "result": "Not logged in · Please run /login"]))
+             == [.turnFailed(message: "Claude Code: Not logged in · Please run /login")] && failedAgent.isFinished)
+precondition(A.toolSummary(name: "Read", input: ["file_path": "/a/b/Notes.md"]) == "Reading Notes.md")
+precondition(A.toolSummary(name: "Bash", input: ["command": "ls -la\npwd"]) == "Running ls -la")
+precondition(A.toolSummary(name: "WebSearch", input: ["query": "weather Paris"]) == "Searching the web for weather Paris")
+precondition(A.toolSummary(name: "mcp__x__y", input: [:]) == "Using mcp__x__y")
+print("PASS: agent event parsing, duplicate tool records, plans, failures, and tool summaries")
 SWIFT
 
 xcrun swiftc -O -target "$(uname -m)-apple-macos26.0" -o "$OUT/claude_cli_tests" \
-  "$ROOT/cursor-buddy/ClaudeCodeCLIProtocol.swift" "$OUT/main.swift"
+  "$ROOT/cursor-buddy/ClaudeCodeCLIProtocol.swift" "$ROOT/cursor-buddy/ClaudeCodeAgentEvents.swift" "$OUT/main.swift"
 "$OUT/claude_cli_tests"

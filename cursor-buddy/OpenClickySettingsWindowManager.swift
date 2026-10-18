@@ -1418,7 +1418,7 @@ struct OpenClickySettingsView: View {
 
             settingsGroup("Agent Mode Model") {
                 modelOptionGrid(
-                    options: OpenClickyModelCatalog.codexActionsModels,
+                    options: OpenClickyModelCatalog.agentModels,
                     selectedModelID: session.model,
                     select: { session.setModel($0) }
                 )

@@ -186,7 +186,7 @@ struct ChatHeaderBar: View {
   }
 
   private var codexOptions: [OpenClickyModelOption] {
-    OpenClickyModelCatalog.codexActionsModels
+    OpenClickyModelCatalog.agentModels
   }
 
   private func selectModel(_ id: String) {

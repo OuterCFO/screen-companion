@@ -26,6 +26,8 @@ final class ClaudeCodeCLITurnProcess {
     private var onSessionStarted: ((String) -> Void)?
     private var timeoutTask: Task<Void, Never>?
     let configurationKey: String
+    /// Receives every stream-json line before it is parsed, for callers that need tool events.
+    var onLine: ((String) -> Void)?
 
     var isRunning: Bool { process.isRunning }
 
@@ -108,6 +110,7 @@ final class ClaudeCodeCLITurnProcess {
             let lineData = outputBuffer[outputBuffer.startIndex..<newline]
             outputBuffer.removeSubrange(outputBuffer.startIndex...newline)
             guard let line = String(data: lineData, encoding: .utf8) else { continue }
+            onLine?(line)
             switch state.consume(line: line) {
             case .started(let sessionID): onSessionStarted?(sessionID)
             case .text(let text): onText?(text)

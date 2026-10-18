@@ -272,6 +272,20 @@ nonisolated enum OpenClickyModelCatalog {
             ?? computerUseModels[0]
     }
 
+    /// Background agent models: Codex models run in Codex, Claude models in the user's Claude Code CLI.
+    static let claudeAgentModels: [OpenClickyModelOption] = [
+        OpenClickyModelOption(id: "claude-sonnet-5-5", label: "Sonnet 5.5 (Claude Code)", provider: .anthropic, maxOutputTokens: 64_000),
+        OpenClickyModelOption(id: "claude-opus-5-5", label: "Opus 5.5 (Claude Code)", provider: .anthropic, maxOutputTokens: 128_000),
+        OpenClickyModelOption(id: "claude-fable-5-1", label: "Fable 5.1 (Claude Code)", provider: .anthropic, maxOutputTokens: 64_000)
+    ]
+
+    static let agentModels: [OpenClickyModelOption] = codexActionsModels + claudeAgentModels
+
+    static func agentModel(withID modelID: String) -> OpenClickyModelOption {
+        let resolved = normalizedModelID(modelID)
+        return agentModels.first { $0.id == resolved } ?? codexActionsModel(withID: resolved)
+    }
+
     static func codexActionsModel(withID modelID: String) -> OpenClickyModelOption {
         let resolved = normalizedModelID(modelID)
         return codexActionsModels.first { $0.id == resolved }

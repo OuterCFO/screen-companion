@@ -590,11 +590,11 @@ struct CodexAgentModeSettingsSheet: View {
 
                         settingsSection(
                             title: "Coding and actions model",
-                            subtitle: "Used for background Agent Mode when OpenClicky decides a request needs deeper tools, files, research, or coding. The bundled Codex runtime uses local ChatGPT sign-in when no OpenAI key is set."
+                            subtitle: "Used for background Agent Mode when OpenClicky decides a request needs deeper tools, files, research, or coding. GPT models run in the bundled Codex runtime with your ChatGPT sign-in; Claude models run in your Claude Code CLI with your Claude plan."
                         ) {
                             VStack(spacing: 7) {
                                 modelOptionGrid(
-                                    options: OpenClickyModelCatalog.codexActionsModels,
+                                    options: OpenClickyModelCatalog.agentModels,
                                     selectedModelID: session.model,
                                     select: session.setModel
                                 )

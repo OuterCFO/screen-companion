@@ -40,6 +40,17 @@ OpenClicky adds its pointing and summary format for that turn only with `--appen
 Cursor turns may use Read, Grep, Glob, WebSearch, and WebFetch; edits and shell commands are denied.
 History reloads the transcript from the session file.
 
+## Background agent tasks
+
+Agent tasks run in Claude Code when the agent model is a Claude model (Sonnet 5.5, Opus 5.5, or Fable 5.1 in Settings, Agent Mode Model).
+GPT models still run in the bundled Codex runtime.
+Each turn runs `claude -p` in the task's working folder with your own Claude Code settings, CLAUDE.md, skills, and MCP servers.
+Turns run unattended with `--permission-mode auto`, so Claude Code's safety checks approve or block actions without asking you.
+Browser-sandbox tasks use `acceptEdits` instead, limited to their sandbox folder.
+Terminal `xcodebuild` is blocked, as it is for Codex agents.
+Follow-ups continue the same Claude Code session with `--resume`, so the task appears in `claude --resume` like any other session.
+The task panel shows the same transcript, commands, plans, and final answer as a Codex task.
+
 ## Limits
 
 A Claude Code window that already has the session open keeps its own in-memory context.
