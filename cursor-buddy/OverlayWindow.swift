@@ -179,8 +179,7 @@ class OverlayWindow: NSWindow {
 
 /// Cursor avatar styles.
 ///
-/// Stored as a `String` (with embedded payload for `.pet`) so it round-trips
-/// through `@AppStorage` and `UserDefaults` cleanly.
+/// Stored as a `String` so it round-trips through `@AppStorage` and `UserDefaults` cleanly.
 ///
 /// Legacy values:
 ///   - `"triangle"` (pre-fork single triangle) ➝ treated as `.triangleFilled`.
@@ -189,17 +188,14 @@ class OverlayWindow: NSWindow {
 enum ClickyCursorAvatarStyle: Equatable {
     case triangleFilled
     case triangleOutline
-    case pet(id: String)
 
     static let userDefaultsKey = "openclicky.cursorAvatarStyle"
     static let `default`: ClickyCursorAvatarStyle = .triangleFilled
 
-    /// Storage representation. `.pet(id)` is encoded as `"pet:<id>"`.
     var storageValue: String {
         switch self {
         case .triangleFilled:    return "triangleFilled"
         case .triangleOutline:   return "triangleOutline"
-        case .pet(let id):       return "pet:\(id)"
         }
     }
 
@@ -209,30 +205,14 @@ enum ClickyCursorAvatarStyle: Equatable {
             self = .triangleFilled
         case "triangleOutline":
             self = .triangleOutline
-        // Legacy values we no longer support — fall back to default.
-        case "paperclip", "customAsset":
-            self = .triangleFilled
+        // Legacy values, including removed "pet:<id>" avatars, fall back to the default.
         default:
-            if raw.hasPrefix("pet:") {
-                let id = String(raw.dropFirst("pet:".count))
-                if !id.isEmpty {
-                    self = .pet(id: id)
-                    return
-                }
-            }
             self = .triangleFilled
         }
     }
 
-    /// Whether the parent view should apply rotation to this avatar.
-    /// Triangles point in a direction; pets always face up and use their
-    /// own running-left/running-right rows for direction.
-    var honorsParentRotation: Bool {
-        switch self {
-        case .triangleFilled, .triangleOutline: return true
-        case .pet:                              return false
-        }
-    }
+    /// Whether the parent view should apply rotation to this avatar; triangles point in a direction.
+    var honorsParentRotation: Bool { true }
 }
 
 enum ClickyCursorAvatarSizePreference {
@@ -245,12 +225,7 @@ enum ClickyCursorAvatarSizePreference {
 private struct ClickyCursorAvatarView: View {
     let accentColor: Color
     var showsEyes: Bool = true
-    /// High-level animation state used when rendering a pet. Ignored for
-    /// triangle styles. Default is `.idle` so the existing call sites that
-    /// don't have a state machine still render cleanly.
-    var animationState: ClickyBuddyAnimationState = .idle
     @AppStorage(ClickyCursorAvatarStyle.userDefaultsKey) private var avatarStyleRawValue = ClickyCursorAvatarStyle.default.storageValue
-    @ObservedObject private var petLibrary = ClickyBuddyPetLibrary.shared
 
     private var avatarStyle: ClickyCursorAvatarStyle {
         ClickyCursorAvatarStyle(storageValue: avatarStyleRawValue)
@@ -262,14 +237,6 @@ private struct ClickyCursorAvatarView: View {
             ClickyTriangleCursorView(accentColor: accentColor, style: .filled)
         case .triangleOutline:
             ClickyTriangleCursorView(accentColor: accentColor, style: .outline)
-        case .pet(let id):
-            if let pet = petLibrary.pet(withID: id) {
-                ClickyPetSpriteView(pet: pet, animationState: animationState)
-            } else {
-                // Pet referenced but not installed (yet) — graceful fallback
-                // keeps the cursor visible while the user re-picks or hatches.
-                ClickyTriangleCursorView(accentColor: accentColor, style: .filled)
-            }
         }
     }
 }
@@ -566,20 +533,6 @@ struct BlueCursorView: View {
     /// Only during the return flight can cursor movement cancel the animation.
     @State private var isReturningToCursor: Bool = false
 
-    // MARK: - Pet animation state
-    //
-    // Only used when the user has picked a `.pet(...)` cursor avatar style.
-    // Triangle styles ignore these.
-
-    /// High-level animation state fed to `ClickyPetSpriteView`.
-    @State private var petAnimationState: ClickyBuddyAnimationState = .idle
-
-    /// Last horizontal cursor position used to estimate running direction.
-    @State private var lastDirectionSampleX: CGFloat = 0
-    /// Wall-clock time of the last running-row update — drives a small dwell
-    /// hysteresis so tiny ↔ swap doesn't flip-flop the row every frame.
-    @State private var lastRunningRowFlipAt: Date = .distantPast
-
     @AppStorage(ClickyCursorAvatarStyle.userDefaultsKey)
     private var avatarStyleRawValueForRotation = ClickyCursorAvatarStyle.default.storageValue
 
@@ -592,15 +545,7 @@ struct BlueCursorView: View {
         currentCursorAvatarStyle.honorsParentRotation
     }
 
-    /// Keep glow for triangle cursors only; pet sprites should not glow.
-    private var shouldShowCursorGlow: Bool {
-        switch currentCursorAvatarStyle {
-        case .triangleFilled, .triangleOutline:
-            return true
-        case .pet:
-            return false
-        }
-    }
+    private var shouldShowCursorGlow: Bool { true }
 
     private var isCalibrationCursorBoxActive: Bool {
         visualGuidanceOverlaysOnThisScreen.contains { overlay in
@@ -698,9 +643,7 @@ struct BlueCursorView: View {
             // During navigation: NO implicit animation — the frame-by-frame bezier
             // timer controls position directly at 60fps for a smooth arc flight.
             //
-            // Rotation is applied conditionally: triangle styles point in their
-            // direction of travel via rotation; pet sprites face up and use
-            // their own running-left/running-right rows for direction instead.
+            // Triangle styles point in their direction of travel via rotation.
             ZStack {
                 if isCalibrationCursorBoxActive {
                     OpenClickyCalibrationCursorBoxView(
@@ -708,10 +651,7 @@ struct BlueCursorView: View {
                         reduceMotion: accessibilityReduceMotion
                     )
                 } else {
-                    ClickyCursorAvatarView(
-                        accentColor: overlayCursorColor,
-                        animationState: petAnimationState
-                    )
+                    ClickyCursorAvatarView(accentColor: overlayCursorColor)
                 }
             }
                 .frame(
@@ -739,24 +679,13 @@ struct BlueCursorView: View {
                     buddyNavigationMode == .navigatingToTarget ? nil : .easeInOut(duration: 0.3),
                     value: buddyRotationDegrees
                 )
-                // Recompute pet row whenever ANY relevant input changes —
-                // covers navigation flights (cursorPosition is updated by
-                // the bezier timer, not the mouse tracker) and state-only
-                // transitions like processing or pointing.
                 .onChange(of: cursorPosition) { _, newPos in
-                    updatePetAnimationStateForCursorMotion(toX: newPos.x)
                     if buddyIsVisibleOnThisScreen {
                         cursorState.aiPointerScreenLocation = CGPoint(
                             x: screenFrame.minX + newPos.x,
                             y: screenFrame.maxY - newPos.y
                         )
                     }
-                }
-                .onChange(of: buddyNavigationMode) { _, _ in
-                    updatePetAnimationStateForCursorMotion(toX: cursorPosition.x)
-                }
-                .onChange(of: cursorState.voiceState) { _, _ in
-                    updatePetAnimationStateForCursorMotion(toX: cursorPosition.x)
                 }
 
             // Blue waveform — replaces the mascot while listening
@@ -1206,71 +1135,6 @@ struct BlueCursorView: View {
         let buddyX = swiftUIPosition.x + 35
         let buddyY = swiftUIPosition.y + 25
         cursorPosition = CGPoint(x: buddyX, y: buddyY)
-
-        updatePetAnimationStateForCursorMotion(toX: buddyX)
-    }
-
-    // MARK: - Pet animation state derivation
-
-    /// Translates the buddy's full state (voice, navigation, cursor motion)
-    /// into the right atlas row for the pet sprite. Called on every cursor
-    /// position change AND on every navigation/voice state change so the
-    /// pet stays in sync regardless of who's driving the position update
-    /// (mouse tracker vs. bezier-flight timer).
-    private func updatePetAnimationStateForCursorMotion(toX newX: CGFloat) {
-        // Skip work entirely when the active avatar isn't a pet — the
-        // triangle styles ignore animation state.
-        guard !avatarHonorsRotation else { return }
-
-        // Highest priority: thinking spinner shouldn't show running cycles.
-        if cursorState.voiceState == .processing {
-            setPetAnimationState(.review)
-            lastDirectionSampleX = newX
-            return
-        }
-        // Pointing-at-target is a stationary pose — wave at the target.
-        if buddyNavigationMode == .pointingAtTarget {
-            setPetAnimationState(.waving)
-            lastDirectionSampleX = newX
-            return
-        }
-
-        // Velocity drives direction whether we're following the cursor OR
-        // flying along a bezier arc — both update `cursorPosition`. During
-        // navigation the bezier timer ticks at 60fps so dx stays meaningful.
-        let dx = newX - lastDirectionSampleX
-        let now = Date()
-        let deadZone: CGFloat = 1.5
-        let minDwell: TimeInterval = 0.08
-        let isFlying = buddyNavigationMode == .navigatingToTarget
-
-        if abs(dx) < deadZone {
-            // Mid-flight with no horizontal component (vertical arc, or
-            // crest of the curve where dx briefly approaches 0) — fall back
-            // to the generic running row so the sprite keeps looking active.
-            if isFlying {
-                if petAnimationState != .running {
-                    setPetAnimationState(.running)
-                }
-            } else if now.timeIntervalSince(lastRunningRowFlipAt) > 0.6 {
-                // Following cursor and cursor has been still for >0.6s.
-                setPetAnimationState(.idle)
-            }
-        } else {
-            let desired: ClickyBuddyAnimationState = dx > 0 ? .runningRight : .runningLeft
-            if desired != petAnimationState,
-               now.timeIntervalSince(lastRunningRowFlipAt) > minDwell {
-                setPetAnimationState(desired)
-                lastRunningRowFlipAt = now
-            }
-        }
-        lastDirectionSampleX = newX
-    }
-
-    private func setPetAnimationState(_ next: ClickyBuddyAnimationState) {
-        if petAnimationState != next {
-            petAnimationState = next
-        }
     }
 
     /// Converts a macOS screen point (AppKit, bottom-left origin) to SwiftUI
@@ -2335,14 +2199,7 @@ private struct ClickyAgentDockItemView: View {
     @AppStorage(ClickyCursorAvatarStyle.userDefaultsKey)
     private var avatarStyleRawValue = ClickyCursorAvatarStyle.default.storageValue
 
-    private var shouldShowAccentGlow: Bool {
-        switch ClickyCursorAvatarStyle(storageValue: avatarStyleRawValue) {
-        case .triangleFilled, .triangleOutline:
-            return true
-        case .pet:
-            return false
-        }
-    }
+    private var shouldShowAccentGlow: Bool { true }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {

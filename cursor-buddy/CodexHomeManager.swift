@@ -436,7 +436,7 @@ final class CodexHomeManager {
     }
 
     /// Copies any first-level subdirectories present at `source` but absent at
-    /// `destination`. Used to add newly-bundled skills (e.g. `hatch-pet` shipped
+    /// `destination`. Used to add newly-bundled skills (e.g. a skill shipped
     /// in a later app version) into a previously-seeded CodexHome without
     /// re-copying the existing skills directory. Skips files at the source
     /// root and never overwrites an existing destination subdirectory.

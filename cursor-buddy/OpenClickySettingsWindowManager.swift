@@ -180,8 +180,6 @@ struct OpenClickySettingsView: View {
     @ObservedObject private var wakeWordManager: OpenClickyWakeWordManager
     @ObservedObject private var session: CodexAgentSession
     @ObservedObject private var nativeComputerUseController: OpenClickyNativeComputerUseController
-    @ObservedObject private var petLibrary = ClickyBuddyPetLibrary.shared
-    @StateObject private var openPetsCatalog = OpenPetsCatalogStore()
     @StateObject private var localSpeechModelManager = OpenClickyLocalSpeechModelManager.shared
     @StateObject private var localModelDownloadService = OpenClickyLocalModelDownloadService.shared
     @StateObject private var localInferenceRuntime = OpenClickyLocalInferenceRuntimeManager.shared
@@ -764,7 +762,7 @@ struct OpenClickySettingsView: View {
 
             settingsGroup("Cursor appearance") {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("Pick OpenClicky’s cursor buddy and accent color. Pets ignore the color tint, but the accent still drives glows, buttons, and task badges.")
+                    Text("Pick OpenClicky’s cursor shape and accent color. The accent also drives glows, buttons, and task badges.")
                         .font(appUIFont(size: subtextFontSize, weight: .regular))
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -772,12 +770,6 @@ struct OpenClickySettingsView: View {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
                         cursorAvatarButton(.triangleFilled, label: "Triangle")
                         cursorAvatarButton(.triangleOutline, label: "Outline")
-                        ForEach(petLibrary.pets) { pet in
-                            cursorPetButton(pet)
-                        }
-                        if petLibrary.pets.isEmpty {
-                            emptyPetLibraryTile
-                        }
                     }
 
                     Divider()
@@ -788,11 +780,6 @@ struct OpenClickySettingsView: View {
                             cursorColorButton(accentTheme)
                         }
                     }
-
-                    Divider()
-                        .opacity(0.45)
-
-                    openPetsCatalogSection
                 }
                 .padding(14)
             }
@@ -2648,8 +2635,6 @@ struct OpenClickySettingsView: View {
                             .stroke(accent, lineWidth: 2.2)
                             .frame(width: 19, height: 19)
                             .rotationEffect(.degrees(-25))
-                    case .pet:
-                        EmptyView()
                     }
                 }
 
@@ -2669,210 +2654,6 @@ struct OpenClickySettingsView: View {
             )
         }
         .buttonStyle(.plain)
-    }
-
-    private func cursorPetButton(_ pet: ClickyBuddyPet) -> some View {
-        let style = ClickyCursorAvatarStyle.pet(id: pet.id)
-        let isSelected = currentCursorAvatarStyle == style
-        let accent = (ClickyAccentTheme(rawValue: selectedAccentThemeID) ?? .blue).cursorColor
-
-        return Button {
-            avatarStyleRawValue = style.storageValue
-        } label: {
-            VStack(spacing: 8) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(isSelected ? accent.opacity(0.16) : Color.primary.opacity(0.045))
-                        .frame(width: 46, height: 46)
-                    ClickyPetThumbnailView(pet: pet)
-                        .frame(width: 34, height: 36)
-                }
-
-                Text(pet.displayName)
-                    .font(appUIFont(size: max(10, subtextFontSize), weight: .medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(isSelected ? accent.opacity(0.12) : Color(nsColor: .windowBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .stroke(isSelected ? accent.opacity(0.8) : Color.primary.opacity(0.08), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .help(pet.petDescription)
-    }
-
-    private var openPetsCatalogSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("OpenPets gallery")
-                        .font(appUIFont(size: bodyFontSize, weight: .semibold))
-                    Text("Browse installable pets from openpets.dev. Installed packs land in the same local pet library OpenClicky already watches.")
-                        .font(appUIFont(size: subtextFontSize, weight: .regular))
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer()
-
-                Button(openPetsCatalog.isLoading ? "Loading…" : "Refresh") {
-                    openPetsCatalog.refreshCatalog()
-                }
-                .disabled(openPetsCatalog.isLoading)
-                .controlSize(.small)
-            }
-
-            TextField("Search loaded OpenPets", text: $openPetsCatalog.searchText)
-                .textFieldStyle(.roundedBorder)
-                .font(appUIFont(size: bodyFontSize, weight: .regular))
-
-            if let error = openPetsCatalog.errorMessage {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(appUIFont(size: subtextFontSize, weight: .regular))
-                    .foregroundColor(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
-                ForEach(openPetsCatalog.visiblePets) { pet in
-                    openPetsCatalogCard(pet)
-                }
-            }
-
-            HStack {
-                let loaded = max(openPetsCatalog.pets.count, openPetsCatalog.visiblePets.count)
-                Text(openPetsCatalog.totalCount > 0 ? "\(loaded) of \(openPetsCatalog.totalCount) OpenPets loaded" : "OpenPets catalog")
-                    .font(appUIFont(size: subtextFontSize, weight: .regular))
-                    .foregroundColor(.secondary)
-
-                Spacer()
-
-                if openPetsCatalog.loadedPageCount < openPetsCatalog.pageCount {
-                    Button(openPetsCatalog.isLoading ? "Loading…" : "Load more") {
-                        openPetsCatalog.loadMore()
-                    }
-                    .disabled(openPetsCatalog.isLoading)
-                    .controlSize(.small)
-                }
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.62))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
-        .onAppear {
-            openPetsCatalog.loadInitialCatalogIfNeeded()
-        }
-    }
-
-    private func openPetsCatalogCard(_ pet: OpenPetsCatalogPet) -> some View {
-        let isInstalled = petLibrary.pet(withID: pet.id) != nil
-        let isInstalling = openPetsCatalog.installingPetIDs.contains(pet.id)
-        let accent = (ClickyAccentTheme(rawValue: selectedAccentThemeID) ?? .blue).cursorColor
-
-        return VStack(alignment: .leading, spacing: 8) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.primary.opacity(0.045))
-                    .frame(height: 76)
-
-                if let url = pet.previewURL {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .interpolation(.none)
-                                .scaledToFit()
-                        case .failure:
-                            Image(systemName: "pawprint")
-                                .foregroundColor(.secondary)
-                        case .empty:
-                            ProgressView()
-                                .controlSize(.small)
-                        @unknown default:
-                            EmptyView()
-                        }
-                    }
-                    .frame(width: 58, height: 62)
-                } else {
-                    Image(systemName: "pawprint")
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            Text(pet.displayName)
-                .font(appUIFont(size: max(10, subtextFontSize), weight: .semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-
-            Text(pet.description)
-                .font(appUIFont(size: max(9, subtextFontSize - 1), weight: .regular))
-                .foregroundColor(.secondary)
-                .lineLimit(2)
-
-            Button {
-                if isInstalled {
-                    avatarStyleRawValue = ClickyCursorAvatarStyle.pet(id: pet.id).storageValue
-                } else {
-                    openPetsCatalog.install(pet, into: petLibrary)
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: isInstalled ? "checkmark.circle.fill" : "arrow.down.circle")
-                    Text(isInstalled ? "Use" : isInstalling ? "Installing…" : "Install")
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(isInstalled ? accent : DS.Colors.accent)
-            .controlSize(.small)
-            .disabled(isInstalling)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.84))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
-        .help(pet.description)
-    }
-
-    private var emptyPetLibraryTile: some View {
-        VStack(spacing: 7) {
-            Image(systemName: "pawprint")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.secondary)
-            Text("No pets")
-                .font(appUIFont(size: max(10, subtextFontSize), weight: .medium))
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-        )
     }
 
     private func rowIcon(_ systemImageName: String) -> some View {

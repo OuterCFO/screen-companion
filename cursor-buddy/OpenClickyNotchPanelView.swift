@@ -61,7 +61,6 @@ struct OpenClickyNotchPanelView: View {
     @ObservedObject var agentStore = OpenClickyAgentStore.shared
     @ObservedObject var automationStore = OpenClickyAutomationStore.shared
     @ObservedObject var skillDiscoveryStore = OpenClickySkillDiscoveryStore.shared
-    @ObservedObject var petLibrary = ClickyBuddyPetLibrary.shared
     @AppStorage(ClickyAccentTheme.userDefaultsKey) var selectedAccentThemeID = ClickyAccentTheme.blue.rawValue
     @AppStorage(ClickyCursorAvatarStyle.userDefaultsKey) var avatarStyleRawValue = ClickyCursorAvatarStyle.default.storageValue
     @AppStorage(ClickyCursorAvatarSizePreference.userDefaultsKey) var cursorAvatarSizeScale = ClickyCursorAvatarSizePreference.defaultScale
@@ -72,9 +71,6 @@ struct OpenClickyNotchPanelView: View {
     @AppStorage(AppBundleConfiguration.userAppSubtextFontSizeDefaultsKey) private var appSubtextFontSize = 11.0
     @AppStorage(AppBundleConfiguration.userAppLineSpacingDefaultsKey) private var appLineSpacing = 2.0
     @AppStorage(AppBundleConfiguration.userThemeDefaultsKey) private var clickyTheme = ClickyTheme.system.rawValue
-    @State var isShowingHatchSheet = false
-    @State var hatchPetName = ""
-    @State var hatchPetDescription = ""
     @State var isPanelPinned: Bool
 
     let setPanelPinned: (Bool) -> Void

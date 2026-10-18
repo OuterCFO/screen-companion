@@ -37,9 +37,6 @@ extension OpenClickyNotchPanelView {
 
     func panelDialogs<Content: View>(_ content: Content) -> some View {
         content
-        .sheet(isPresented: $isShowingHatchSheet) {
-            hatchPetSheet
-        }
         .confirmationDialog(
             "Stop this running OpenClicky task?",
             isPresented: stopTaskDialogBinding,
@@ -1396,14 +1393,7 @@ extension OpenClickyNotchPanelView {
         ClickyCursorAvatarStyle(storageValue: avatarStyleRawValue)
     }
 
-    private var shouldShowCursorColorSection: Bool {
-        switch currentCursorAvatarStyle {
-        case .triangleFilled, .triangleOutline:
-            return true
-        case .pet:
-            return false
-        }
-    }
+    private var shouldShowCursorColorSection: Bool { true }
 
     private var cursorBuddySection: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -1412,34 +1402,12 @@ extension OpenClickyNotchPanelView {
                     .font(panelUIFont(size: 12, weight: .heavy))
                     .foregroundColor(DS.Colors.textSecondary)
                 Spacer()
-                Button(action: { presentHatchSheet() }) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "sparkles")
-                            .font(panelUIFont(size: 12, weight: .semibold))
-                        Text("Hatch new")
-                            .font(panelUIFont(size: 10, weight: .heavy))
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.07)))
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.white.opacity(0.10), lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(DS.Colors.textSecondary)
-                .accessibilityLabel("Hatch a new cursor buddy")
-                .help("Hatch a new cursor buddy")
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     avatarTile(.triangleFilled, label: "Triangle")
                     avatarTile(.triangleOutline, label: "Outline")
-                    ForEach(petLibrary.pets) { pet in
-                        avatarTileForPet(pet)
-                    }
-                    if petLibrary.pets.isEmpty {
-                        emptyBuddiesHintTile
-                    }
                 }
             }
 
@@ -1478,24 +1446,6 @@ extension OpenClickyNotchPanelView {
         }
     }
 
-    private var emptyBuddiesHintTile: some View {
-        Button(action: { presentHatchSheet() }) {
-            VStack(spacing: 2) {
-                Image(systemName: "plus")
-                    .font(panelUIFont(size: 15, weight: .semibold))
-                    .foregroundColor(DS.Colors.textTertiary)
-                Text("Hatch")
-                    .font(panelUIFont(size: 9, weight: .medium))
-                    .foregroundColor(DS.Colors.textTertiary)
-            }
-            .frame(width: 62, height: 44)
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(DS.Colors.borderSubtle, style: StrokeStyle(lineWidth: 0.8, dash: [3, 3])))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Hatch a new cursor buddy")
-        .help("Hatch a new cursor buddy")
-    }
-
     private func avatarTile(_ style: ClickyCursorAvatarStyle, label: String) -> some View {
         let isSelected = currentCursorAvatarStyle == style
         let accent = (ClickyAccentTheme(rawValue: selectedAccentThemeID) ?? .blue).cursorColor
@@ -1518,8 +1468,6 @@ extension OpenClickyNotchPanelView {
                             .stroke(accent, lineWidth: 2.5)
                             .frame(width: 18, height: 18)
                             .rotationEffect(.degrees(-25))
-                    case .pet:
-                        EmptyView()
                     }
                 }
             }
@@ -1528,25 +1476,6 @@ extension OpenClickyNotchPanelView {
         }
         .buttonStyle(.plain)
         .help(label)
-    }
-
-    private func avatarTileForPet(_ pet: ClickyBuddyPet) -> some View {
-        let style = ClickyCursorAvatarStyle.pet(id: pet.id)
-        let isSelected = currentCursorAvatarStyle == style
-        let accent = (ClickyAccentTheme(rawValue: selectedAccentThemeID) ?? .blue).cursorColor
-
-        return Button(action: { avatarStyleRawValue = style.storageValue }) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isSelected ? accent.opacity(0.16) : Color.white.opacity(0.055))
-                ClickyPetThumbnailView(pet: pet)
-                    .frame(width: 34, height: 36)
-            }
-            .frame(width: 62, height: 44)
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(isSelected ? accent : DS.Colors.borderSubtle, lineWidth: isSelected ? 1.7 : 0.7))
-        }
-        .buttonStyle(.plain)
-        .help(pet.displayName)
     }
 
     private var cursorColorThemeOrder: [ClickyAccentTheme] {
@@ -1575,45 +1504,6 @@ extension OpenClickyNotchPanelView {
         }
         .buttonStyle(.plain)
         .help(accentTheme.title)
-    }
-
-    private func presentHatchSheet() {
-        hatchPetName = ""
-        hatchPetDescription = ""
-        isShowingHatchSheet = true
-    }
-
-    private var hatchPetSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Hatch a new buddy")
-                .font(panelUIFont(size: 14, weight: .semibold))
-            Text("Launches an Agent Mode hatch-pet session.")
-                .font(panelUIFont(size: 11))
-                .foregroundColor(DS.Colors.textSecondary)
-            TextField("Name", text: $hatchPetName)
-                .textFieldStyle(.roundedBorder)
-            TextField("Description optional", text: $hatchPetDescription)
-                .textFieldStyle(.roundedBorder)
-            HStack {
-                Spacer()
-                Button("Cancel") { isShowingHatchSheet = false }
-                    .help("Cancel buddy hatch")
-                Button("Hatch") {
-                    let theme = ClickyAccentTheme(rawValue: selectedAccentThemeID) ?? .blue
-                    _ = ClickyPetHatchCoordinator.shared.beginHatch(
-                        name: hatchPetName,
-                        description: hatchPetDescription,
-                        accentTheme: theme,
-                        companionManager: companionManager
-                    )
-                    isShowingHatchSheet = false
-                }
-                .disabled(hatchPetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .help("Start hatching this buddy")
-            }
-        }
-        .padding(16)
-        .frame(width: 360)
     }
 
     private var permissionProgressStrip: some View {
