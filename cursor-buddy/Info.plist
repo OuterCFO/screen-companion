@@ -30,8 +30,6 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>NSCameraUsageDescription</key>
-	<string>OpenClicky uses the selected camera only when you enable visual intelligence or meeting notes, so it can understand camera images and visible text.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>OpenClicky uses Apple Events only when you ask it to automate local apps or System Events for guarded macOS control.</string>
 	<key>NSMicrophoneUsageDescription</key>

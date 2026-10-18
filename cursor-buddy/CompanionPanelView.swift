@@ -22,7 +22,6 @@ struct CompanionPanelView: View {
     private let onQuit: () -> Void
     private let onOpenHUD: () -> Void
     private let onOpenMemory: () -> Void
-    private let onOpenVisual: () -> Void
     private let onOpenFeedback: () -> Void
     private let onShowSettings: () -> Void
 
@@ -49,7 +48,6 @@ struct CompanionPanelView: View {
             onQuit: { NSApp.terminate(nil) },
             onOpenHUD: { companionManager.showCodexHUD() },
             onOpenMemory: { companionManager.showMemoryWindow() },
-            onOpenVisual: { companionManager.showVisualIntelligenceWorkspace() },
             onOpenFeedback: { Self.openFeedbackInbox() },
             onShowSettings: { companionManager.showSettingsWindow() }
         )
@@ -63,7 +61,6 @@ struct CompanionPanelView: View {
         onQuit: @escaping () -> Void,
         onOpenHUD: @escaping () -> Void,
         onOpenMemory: @escaping () -> Void,
-        onOpenVisual: @escaping () -> Void,
         onOpenFeedback: @escaping () -> Void,
         onShowSettings: @escaping () -> Void
     ) {
@@ -74,7 +71,6 @@ struct CompanionPanelView: View {
         self.onQuit = onQuit
         self.onOpenHUD = onOpenHUD
         self.onOpenMemory = onOpenMemory
-        self.onOpenVisual = onOpenVisual
         self.onOpenFeedback = onOpenFeedback
         self.onShowSettings = onShowSettings
     }
@@ -1201,12 +1197,6 @@ struct CompanionPanelView: View {
                             systemImageName: "books.vertical",
                             helpText: "Open memory",
                             action: { onOpenMemory() }
-                        )
-
-                        footerIconButton(
-                            systemImageName: "camera.viewfinder",
-                            helpText: "Open visual intelligence and meeting notes",
-                            action: { onOpenVisual() }
                         )
                     }
 

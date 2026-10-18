@@ -41,7 +41,6 @@ nonisolated enum AppBundleConfiguration {
     static let userVoiceTranscriptionProviderDefaultsKey = "openClickyVoiceTranscriptionProvider"
     static let userVoiceActivationModeDefaultsKey = "openClickyVoiceActivationMode"
     static let userCameraDeviceIDDefaultsKey = "openClickyCameraDeviceID"
-    static let userCameraVoiceContextEnabledDefaultsKey = "openClickyCameraVoiceContextEnabled"
     static let userAdvancedModeDefaultsKey = "openClickyAdvancedModeEnabled"
     static let userComputerUseBackendDefaultsKey = "openClickyComputerUseBackend"
     static let userNativeComputerUseDefaultsKey = "openClickyNativeComputerUseEnabled"

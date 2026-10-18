@@ -60,17 +60,6 @@ struct cursor_buddyApp: App {
                 }
                 .keyboardShortcut("n", modifiers: [.command, .option])
 
-
-                Button("Visual Intelligence…") {
-                    appDelegate.showVisualIntelligenceWorkspaceFromApplicationMenu()
-                }
-                .keyboardShortcut("v", modifiers: [.command, .option])
-
-                Button("Meeting Notes…") {
-                    appDelegate.showVisualIntelligenceWorkspaceFromApplicationMenu()
-                }
-                .keyboardShortcut("m", modifiers: [.command, .option])
-
                 Divider()
 
                 Button("Browser Workspace…") {
@@ -190,10 +179,6 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDel
 
     func showBrowserWorkspaceFromApplicationMenu() {
         OpenClickyBrowserWorkspaceWindowManager.shared.show(delegate: companionManager)
-    }
-
-    func showVisualIntelligenceWorkspaceFromApplicationMenu() {
-        companionManager.showVisualIntelligenceWorkspace()
     }
 
     func showMemoryWindowFromApplicationMenu() {

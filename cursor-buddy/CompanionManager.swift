@@ -516,7 +516,6 @@ final class CompanionManager: ObservableObject {
     @Published private(set) var hasScreenContentPermission = false
     @Published private(set) var hasFullDiskAccessPermission = false
     @Published private(set) var hasSystemEventsAutomationPermission = false
-    @Published private(set) var hasCameraPermission = false
 
     /// Screen location (global AppKit coords) of a detected UI element the
     /// buddy should fly to and point at. Parsed from Claude's response;
@@ -598,7 +597,6 @@ final class CompanionManager: ObservableObject {
     let agentDockWindowManager = ClickyAgentDockWindowManager()
     let agentMenuBarStatusManager = AgentMenuBarStatusManager()
     let settingsWindowManager = OpenClickySettingsWindowManager()
-    let visualIntelligenceWindowManager = OpenClickyVisualIntelligenceWindowManager()
     let logViewerWindowManager = OpenClickyLogViewerWindowManager()
     let markdownViewerWindowManager = OpenClickyMarkdownViewerWindowManager()
     let widgetStateStore = OpenClickyWidgetStateStore()
@@ -1601,7 +1599,6 @@ final class CompanionManager: ObservableObject {
             accessibility: hasAccessibilityPermission ? .granted : .missing,
             screenRecording: hasScreenRecordingPermission ? .granted : .missing,
             microphone: hasMicrophonePermission ? .granted : .missing,
-            camera: hasCameraPermission ? .granted : .missing,
             screenContent: hasScreenContentPermission ? .granted : .missing
         )
     }
@@ -2050,10 +2047,6 @@ final class CompanionManager: ObservableObject {
         settingsWindowManager.show(companionManager: self)
     }
 
-    func showVisualIntelligenceWorkspace() {
-        visualIntelligenceWindowManager.show(companionManager: self)
-    }
-
     func showLogViewerWindow() {
         logViewerWindowManager.show()
     }
@@ -2104,8 +2097,6 @@ final class CompanionManager: ObservableObject {
             showLogViewerWindow()
         case "memory":
             showMemoryWindow()
-        case "visual", "camera", "meeting":
-            showVisualIntelligenceWorkspace()
         default:
             showSettingsWindow()
         }
@@ -2267,7 +2258,7 @@ final class CompanionManager: ObservableObject {
         // screenshot after a key press doesn't pay the cold-start tax.
         CompanionScreenCaptureUtility.prewarmShareableContent()
         print("OpenClicky runtime identity - bundleID: \(Bundle.main.bundleIdentifier ?? "unknown"), appPath: \(Bundle.main.bundleURL.path)")
-        print("OpenClicky start - accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), camera: \(hasCameraPermission), screenContent: \(hasScreenContentPermission), fullDiskAccess: \(hasFullDiskAccessPermission), onboarded: \(hasCompletedOnboarding)")
+        print("OpenClicky start - accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), screenContent: \(hasScreenContentPermission), fullDiskAccess: \(hasFullDiskAccessPermission), onboarded: \(hasCompletedOnboarding)")
         startPermissionPolling()
         if runtimeMode == .menuBar {
             notchCaptureWindowManager.showPersistentPill(
@@ -3342,7 +3333,6 @@ final class CompanionManager: ObservableObject {
         let previouslyHadAccessibility = hasAccessibilityPermission
         let previouslyHadScreenRecording = hasScreenRecordingPermission
         let previouslyHadMicrophone = hasMicrophonePermission
-        let previouslyHadCamera = hasCameraPermission
         let previouslyHadFullDiskAccess = hasFullDiskAccessPermission
         let previouslyHadSystemEventsAutomation = hasSystemEventsAutomationPermission
         let previouslyHadAll = allPermissionsGranted
@@ -3361,9 +3351,6 @@ final class CompanionManager: ObservableObject {
         let micAuthStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         hasMicrophonePermission = micAuthStatus == .authorized
 
-        let cameraAuthStatus = AVCaptureDevice.authorizationStatus(for: .video)
-        hasCameraPermission = cameraAuthStatus == .authorized
-
         // Screen content permission is persisted after the ScreenCaptureKit
         // picker approves it, but it is only useful when real Screen Recording
         // permission is also present.
@@ -3376,10 +3363,9 @@ final class CompanionManager: ObservableObject {
         if previouslyHadAccessibility != hasAccessibilityPermission
             || previouslyHadScreenRecording != hasScreenRecordingPermission
             || previouslyHadMicrophone != hasMicrophonePermission
-            || previouslyHadCamera != hasCameraPermission
             || previouslyHadFullDiskAccess != hasFullDiskAccessPermission
             || previouslyHadSystemEventsAutomation != hasSystemEventsAutomationPermission {
-            print("Permissions — accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), camera: \(hasCameraPermission), screenContent: \(hasScreenContentPermission), fullDiskAccess: \(hasFullDiskAccessPermission), systemEventsAutomation: \(hasSystemEventsAutomationPermission)")
+            print("Permissions — accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), screenContent: \(hasScreenContentPermission), fullDiskAccess: \(hasFullDiskAccessPermission), systemEventsAutomation: \(hasSystemEventsAutomationPermission)")
         }
 
         // Track individual permission grants as they happen
@@ -3392,9 +3378,6 @@ final class CompanionManager: ObservableObject {
         if !previouslyHadMicrophone && hasMicrophonePermission {
             ClickyAnalytics.trackPermissionGranted(permission: "microphone")
             warmRealtimeVoiceInputIfNeeded(reason: "microphone_permission_granted")
-        }
-        if !previouslyHadCamera && hasCameraPermission {
-            ClickyAnalytics.trackPermissionGranted(permission: "camera")
         }
         if !previouslyHadFullDiskAccess && hasFullDiskAccessPermission {
             ClickyAnalytics.trackPermissionGranted(permission: "full_disk_access")
@@ -3498,39 +3481,8 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    /// Triggers the system camera prompt if the user has never been asked.
-    /// Once granted/denied the status sticks and polling picks it up.
-    private func promptForCameraIfNotDetermined() {
-        guard AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined else { return }
-        AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-            Task { @MainActor [weak self] in
-                self?.hasCameraPermission = granted
-            }
-        }
-    }
-
-    /// Public entry point used by the permission guide and first-run onboarding
-    /// to surface the native camera prompt. If the user has already responded,
-    /// fall back to opening System Settings so they can flip the toggle.
-    func requestCameraPermission() {
-        let status = AVCaptureDevice.authorizationStatus(for: .video)
-        switch status {
-        case .notDetermined:
-            promptForCameraIfNotDetermined()
-        case .denied, .restricted:
-            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") {
-                NSWorkspace.shared.open(url)
-            }
-        case .authorized:
-            hasCameraPermission = true
-        @unknown default:
-            break
-        }
-    }
-
     /// Called when the permission guide or first-run onboarding becomes visible
-    /// to request the base voice permission. Camera is requested only when the
-    /// user enables a camera-specific feature.
+    /// to request the base voice permission.
     func requestPendingPermissionPrompts() {
         promptForMicrophoneIfNotDetermined()
     }

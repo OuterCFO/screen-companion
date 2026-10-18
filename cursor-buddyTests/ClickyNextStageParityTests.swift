@@ -33,14 +33,13 @@ struct ClickyNextStageParityTests {
             accessibility: .missing,
             screenRecording: .granted,
             microphone: .missing,
-            camera: .missing,
             screenContent: .missing
         )
 
         let viewState = PermissionGuideAssistant.viewState(for: snapshot, entryContext: .panel)
 
         #expect(viewState.primaryStep?.kind == .accessibility)
-        #expect(viewState.steps.map(\.kind) == [.accessibility, .screenRecording, .microphone, .camera, .screenContent])
+        #expect(viewState.steps.map(\.kind) == [.accessibility, .screenRecording, .microphone, .screenContent])
         #expect(viewState.steps.filter { $0.status == .missing }.count == 4)
         #expect(viewState.primaryStep?.settingsURL.absoluteString.contains("Privacy_Accessibility") == true)
         #expect(viewState.headline == "Permissions needed")

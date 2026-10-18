@@ -127,7 +127,6 @@ extension CompanionManager {
                     prewarmedScreenshotStartedAt = nil
                     screenCaptures = []
                 }
-                let cameraFrame = await captureCameraFrameForVoiceResponseIfAvailable(transcript: transcript)
                 self.markRequestStageCompleted(
                     route: "voice.response",
                     stage: "screen_capture",
@@ -140,10 +139,8 @@ extension CompanionManager {
                         "screenContextNeeded": shouldAttachScreenContext,
                         "screenCount": screenCaptures.count,
                         "circleSelectAttached": circleHandoff != nil,
-                        "cameraContextAttached": cameraFrame != nil,
                         "imageBytes": screenCaptures.reduce(0) { $0 + $1.imageData.count }
                             + (circleHandoff?.imageData.count ?? 0)
-                            + (cameraFrame?.data.count ?? 0)
                     ]
                 )
 
@@ -167,9 +164,6 @@ extension CompanionManager {
                     let dimensionInfo = " (image dimensions: \(capture.screenshotWidthInPixels)x\(capture.screenshotHeightInPixels) pixels)"
                     return (data: capture.imageData, label: capture.label + dimensionInfo)
                 })
-                if let cameraFrame {
-                    labeledImages.append((data: cameraFrame.data, label: cameraFrame.label))
-                }
 
                 let userPromptForClaude: String
                 if labeledImages.isEmpty {
@@ -1057,52 +1051,6 @@ extension CompanionManager {
         }
     }
 
-    func analyzeVisualWorkspace(
-        images: [(data: Data, label: String)],
-        userPrompt: String,
-        source: String,
-        onTextChunk: @MainActor @Sendable @escaping (String) -> Void
-    ) async throws -> String {
-        let modelID = OpenClickyModelCatalog.voiceAnalysisModel(withID: selectedModel).id
-
-        OpenClickyMessageLogStore.shared.append(
-            lane: "visual",
-            direction: "outgoing",
-            event: "visual.workspace.request",
-            fields: [
-                "source": source,
-                "model": modelID,
-                "imageCount": images.count,
-                "promptLength": userPrompt.count
-            ]
-        )
-
-        let systemPrompt = """
-        You are OpenClicky's Visual Intelligence workspace. Analyze attached camera and screen images carefully and answer the user's prompt.
-
-        Capabilities to apply when relevant:
-        - identify objects, products, devices, people-present/not-present, scene, setting, actions, and situations.
-        - scan and transcribe visible text, labels, prices, dates, codes, warnings, UI text, document snippets, and important information.
-        - infer useful lookup/search terms for visible objects, logos, documents, books, products, or places. Do not claim live web browsing unless a separate Agent Mode task actually performed it.
-        - call out uncertainty, ambiguous visual evidence, and what detail would verify an identification.
-
-        Output style:
-        - concise markdown is allowed.
-        - no [POINT] tags, no hidden routing syntax, no spoken-TTS constraints.
-        - prioritize details that help the user act now.
-        """
-
-        return try await analyzeVoiceResponse(
-            images: images,
-            modelID: modelID,
-            systemPrompt: systemPrompt,
-            conversationHistory: [],
-            userPrompt: userPrompt,
-            assistantPrefill: nil,
-            onTextChunk: onTextChunk
-        )
-    }
-
     func analyzeVoiceResponse(
         images: [(data: Data, label: String)],
         modelID: String? = nil,
@@ -1309,40 +1257,6 @@ extension CompanionManager {
         }
 
         return false
-    }
-
-    private static func shouldAttachCameraContext(to transcript: String) -> Bool {
-        let normalized = transcript
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            .lowercased()
-        let commandText = SpokenText.normalizedSpokenCommandText(transcript)
-        let cameraPhrases = [
-            "camera", "webcam", "cam", "through the camera", "from the camera",
-            "what am i holding", "what is this object", "what's this object",
-            "what is in my hand", "what's in my hand", "on my desk", "behind me",
-            "in the room", "in front of me", "scan this", "read this label",
-            "look at this item", "identify this", "identify that", "what product is this"
-        ]
-        return cameraPhrases.contains { normalized.contains($0) || commandText.contains($0) }
-    }
-
-    private func captureCameraFrameForVoiceResponseIfAvailable(transcript: String) async -> OpenClickyCameraFrame? {
-        let userEnabledCameraContext = UserDefaults.standard.bool(forKey: AppBundleConfiguration.userCameraVoiceContextEnabledDefaultsKey)
-        guard userEnabledCameraContext || Self.shouldAttachCameraContext(to: transcript) else { return nil }
-        do {
-            return try await OpenClickyCameraCaptureController.shared.captureJPEGFrame(labelPrefix: "camera context")
-        } catch {
-            OpenClickyMessageLogStore.shared.append(
-                lane: "voice",
-                direction: "error",
-                event: "voice.camera_context_unavailable",
-                fields: [
-                    "error": error.localizedDescription,
-                    "userEnabledCameraContext": userEnabledCameraContext
-                ]
-            )
-            return nil
-        }
     }
 
     func captureAllScreensForVoiceResponseIfAvailable() async throws -> [CompanionScreenCapture] {

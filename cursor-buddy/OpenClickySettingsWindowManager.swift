@@ -1660,11 +1660,6 @@ struct OpenClickySettingsView: View {
                     settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
                 )
                 permissionRow(
-                    title: "Camera",
-                    isGranted: companionManager.hasCameraPermission,
-                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")!
-                )
-                permissionRow(
                     title: "Full Disk Access",
                     isGranted: companionManager.hasFullDiskAccessPermission,
                     settingsURL: OpenClickyMacPrivacyPermissionProbe.fullDiskAccessSettingsURL
