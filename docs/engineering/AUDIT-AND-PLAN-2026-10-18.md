@@ -88,7 +88,7 @@ Checks per phase: source checks, the full-target typecheck, a native Xcode build
 4. Default to a Claude model the plan supports, with a clear message when a model is unavailable instead of a failed bubble.
 5. Done when: no silent failure events in a normal session, and median time to first text stays under 2 seconds on Claude.
 
-### Phase 3: Background tasks on any provider (implemented 18 October; awaiting native build and live test)
+### Phase 3: Background tasks on any provider (done 18 October; live-tested: 4 Claude Code agent tasks, 8.5 to 12.6 seconds, results shown in the bubble)
 
 1. Keep `CodexAgentSession` as the task model and give it a second runtime: Claude models run `claude -p` turns whose stream events map onto the same transcript, status, and completion helpers as Codex events.
 2. Claude agents use the user's Claude Code settings, `auto` permission mode (`acceptEdits` in the browser sandbox), and resume their session on follow-ups.
