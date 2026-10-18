@@ -229,7 +229,6 @@ private struct OpenClickySystemVolumeControlAction {
 }
 
 enum OpenClickyComputerUsePointingResolver: String {
-    case openAIRealtime = "openai_realtime"
     case anthropicAPI = "anthropic_api"
     case codexCLI = "codex_cli"
     case openAIResponses = "openai_responses"
@@ -384,101 +383,13 @@ nonisolated private enum OpenClickySystemOutputVolume {
 }
 
 @MainActor
-private final class OpenClickyWakeWordAudioDucker {
-    private let duckedVolume: Float = 0.08
-    private var restoreVolume: Float?
-    private var isDucked = false
-    private var outputVolumeUnavailableLogged = false
-
-    func duck(reason: String) {
-        guard !isDucked else {
-            OpenClickyMessageLogStore.shared.append(
-                lane: "voice",
-                direction: "internal",
-                event: "voice.wake_word.audio_duck_unchanged",
-                fields: ["reason": reason]
-            )
-            return
-        }
-
-        guard let currentVolume = OpenClickySystemOutputVolume.currentScalar() else {
-            if !outputVolumeUnavailableLogged {
-                outputVolumeUnavailableLogged = true
-                OpenClickyMessageLogStore.shared.append(
-                    lane: "voice",
-                    direction: "internal",
-                    event: "voice.wake_word.audio_duck_skipped",
-                    fields: [
-                        "reason": reason,
-                        "skipReason": "default_output_volume_unavailable"
-                    ]
-                )
-            }
-            return
-        }
-        outputVolumeUnavailableLogged = false
-
-        let targetVolume = min(currentVolume, duckedVolume)
-        guard currentVolume <= duckedVolume || OpenClickySystemOutputVolume.setScalar(targetVolume) else {
-            OpenClickyMessageLogStore.shared.append(
-                lane: "voice",
-                direction: "internal",
-                event: "voice.wake_word.audio_duck_failed",
-                fields: [
-                    "reason": reason,
-                    "previousVolume": currentVolume,
-                    "targetVolume": targetVolume,
-                    "error": "output_volume_not_settable"
-                ]
-            )
-            return
-        }
-
-        restoreVolume = currentVolume
-        isDucked = true
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "voice.wake_word.audio_ducked",
-            fields: [
-                "reason": reason,
-                "previousVolume": currentVolume,
-                "targetVolume": targetVolume
-            ]
-        )
-    }
-
-    func restore(reason: String) {
-        guard isDucked else { return }
-        let previousVolume = restoreVolume
-        restoreVolume = nil
-        isDucked = false
-
-        guard let previousVolume else { return }
-        let didRestore = OpenClickySystemOutputVolume.setScalar(previousVolume)
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: didRestore ? "internal" : "error",
-            event: didRestore ? "voice.wake_word.audio_restored" : "voice.wake_word.audio_restore_failed",
-            fields: [
-                "reason": reason,
-                "restoredVolume": previousVolume
-            ]
-        )
-    }
-}
-
-@MainActor
 final class CompanionManager: ObservableObject {
     let cursorOverlayState = CursorOverlayState()
     @Published var voiceState: CompanionVoiceState = .idle {
         didSet {
             cursorOverlayState.voiceState = voiceState
-            notchCaptureWindowManager.updateVoiceState(Self.notchVoicePhase(for: voiceState), audioPowerLevel: currentAudioPowerLevel)
             if voiceState == .idle, oldValue != .idle {
                 scheduleVoiceResponseCaptionClear(after: 1.2)
-                wakeWordAudioDucker.restore(reason: "voice_idle")
-                scheduleWakeWordListeningResumeIfNeeded(reason: "voice_idle")
             }
             // Cancel any existing watchdog and reschedule when entering
             // .processing — any subsequent state change cancels it.
@@ -497,18 +408,8 @@ final class CompanionManager: ObservableObject {
     private(set) var currentAudioPowerLevel: CGFloat = 0 {
         didSet {
             cursorOverlayState.currentAudioPowerLevel = currentAudioPowerLevel
-            notchCaptureWindowManager.updateAudioPowerLevel(currentAudioPowerLevel)
         }
     }
-    private static func notchVoicePhase(for voiceState: CompanionVoiceState) -> OpenClickyNotchVoicePhase {
-        switch voiceState {
-        case .idle: return .idle
-        case .listening: return .listening
-        case .processing: return .processing
-        case .responding: return .responding
-        }
-    }
-
     @Published private(set) var hasAccessibilityPermission = false
     @Published private(set) var hasScreenRecordingPermission = false
     @Published private(set) var hasMicrophonePermission = false
@@ -584,15 +485,11 @@ final class CompanionManager: ObservableObject {
 
     private var onboardingMusicPlayer: AVAudioPlayer?
     private var onboardingMusicFadeTimer: Timer?
-    private var onboardingMusicFadeStepsRemaining = 0
-    private var onboardingMusicFadeVolumeDecrement: Float = 0
 
     let buddyDictationManager = BuddyDictationManager()
-    let wakeWordManager = OpenClickyWakeWordManager()
-    private let wakeWordAudioDucker = OpenClickyWakeWordAudioDucker()
     let globalPushToTalkShortcutMonitor = GlobalPushToTalkShortcutMonitor()
     let overlayWindowManager = OverlayWindowManager()
-    let notchCaptureWindowManager = OpenClickyNotchCaptureWindowManager()
+    let compactInputWindowManager = CompactInputWindowManager()
     let agentDockWindowManager = ClickyAgentDockWindowManager()
     let agentMenuBarStatusManager = AgentMenuBarStatusManager()
     let settingsWindowManager = OpenClickySettingsWindowManager()
@@ -638,8 +535,6 @@ final class CompanionManager: ObservableObject {
     /// Environment fallback supports Xcode schemes and local launch scripts.
     private static let anthropicAPIKey = AppBundleConfiguration.anthropicAPIKey()
     private static let openAIAPIKey = AppBundleConfiguration.openAIAPIKey()
-    private static let elevenLabsAPIKey = AppBundleConfiguration.elevenLabsAPIKey()
-    private static let elevenLabsVoiceID = AppBundleConfiguration.elevenLabsVoiceID()
     private static let tutorModeDefaultsKey = "isTutorModeEnabled"
 
     private static func initialTutorModeEnabled() -> Bool {
@@ -680,364 +575,6 @@ final class CompanionManager: ObservableObject {
         let modelOption = OpenClickyModelCatalog.codexVoiceSessionModel(withID: selectedModel)
         return CodexVoiceSession(model: modelOption.id, homeManager: codexHomeManager)
     }()
-
-    private lazy var elevenLabsTTSClient: ElevenLabsTTSClient = {
-        return ElevenLabsTTSClient(
-            apiKey: Self.elevenLabsAPIKey,
-            voiceID: Self.elevenLabsVoiceID
-        )
-    }()
-
-    private lazy var cartesiaTTSClient: CartesiaTTSClient = {
-        return CartesiaTTSClient(
-            apiKey: AppBundleConfiguration.cartesiaAPIKey(),
-            voiceID: AppBundleConfiguration.cartesiaVoiceID()
-        )
-    }()
-
-    struct DeepgramTTSConfigurationSnapshot: Equatable {
-        let apiKey: String?
-        let voiceID: String
-
-        var hasAPIKey: Bool {
-            guard let apiKey else { return false }
-            return !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-
-        static func current() -> Self {
-            Self(
-                apiKey: AppBundleConfiguration.deepgramAPIKey(),
-                voiceID: AppBundleConfiguration.deepgramTTSVoice()
-            )
-        }
-    }
-
-    private var cachedDeepgramTTSClient: DeepgramTTSClient?
-    var cachedDeepgramTTSSnapshot: DeepgramTTSConfigurationSnapshot?
-    /// Mirrors `DeepgramTTSClient.makeError(-100, "Deepgram API key is not configured")`.
-    /// Used for explicit missing-key diagnostics in `voice.response_failure_silent`.
-    static let deepgramNotConfiguredErrorCode = -100
-
-    private var activeDeepgramTTSClient: DeepgramTTSClient {
-        getOrBuildDeepgramTTSClient(reason: "access")
-    }
-
-    @MainActor
-    private func getOrBuildDeepgramTTSClient(reason: String) -> DeepgramTTSClient {
-        let currentSnapshot = DeepgramTTSConfigurationSnapshot.current()
-        if let cachedDeepgramTTSClient, cachedDeepgramTTSSnapshot == currentSnapshot {
-            return cachedDeepgramTTSClient
-        }
-
-        let previousSnapshot = cachedDeepgramTTSSnapshot
-        cachedDeepgramTTSClient?.stopPlayback()
-        let refreshedClient = DeepgramTTSClient(
-            apiKey: currentSnapshot.apiKey,
-            voiceID: currentSnapshot.voiceID
-        )
-        cachedDeepgramTTSClient = refreshedClient
-        cachedDeepgramTTSSnapshot = currentSnapshot
-
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "voice.tts_client_refreshed",
-            fields: [
-                "provider": OpenClickyTTSProvider.deepgram.rawValue,
-                "reason": previousSnapshot == nil ? "initial" : reason,
-                "keyConfigured": currentSnapshot.hasAPIKey,
-                "voiceID": currentSnapshot.voiceID,
-                "snapshotChanged": previousSnapshot != currentSnapshot
-            ]
-        )
-        return refreshedClient
-    }
-
-    @MainActor
-    private func invalidateDeepgramTTSClient(reason: String) {
-        let snapshotBeforeInvalidate = cachedDeepgramTTSSnapshot
-        let liveSnapshot = DeepgramTTSConfigurationSnapshot.current()
-        cachedDeepgramTTSClient?.stopPlayback()
-        cachedDeepgramTTSClient = nil
-        cachedDeepgramTTSSnapshot = nil
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "voice.tts_client_invalidated",
-            fields: [
-                "provider": OpenClickyTTSProvider.deepgram.rawValue,
-                "reason": reason,
-                "keyConfigured": snapshotBeforeInvalidate?.hasAPIKey ?? liveSnapshot.hasAPIKey,
-                "voiceID": snapshotBeforeInvalidate?.voiceID ?? liveSnapshot.voiceID,
-                "snapshotSource": snapshotBeforeInvalidate == nil ? "live_defaults" : "cached_client"
-            ]
-        )
-    }
-
-    @MainActor
-    private func warmDeepgramTTSClientIfActive() {
-        guard selectedTTSProvider == .deepgram else { return }
-        // Accessing `activeDeepgramTTSClient` rebuilds only when the config
-        // snapshot changed; otherwise it returns the cached active client.
-        // In either case, warm the active client to avoid cold-start delay.
-        let currentClient = activeDeepgramTTSClient
-        currentClient.warmUpConnection()
-        FillerPhraseLibrary.shared.prepare(client: currentClient)
-    }
-
-    @MainActor
-    private func warmRealtimeVoiceInputIfNeeded(reason: String) {
-        guard !hasCompletedRealtimeVoiceInputWarmupThisLaunch,
-              realtimeVoiceInputWarmupTask == nil else { return }
-        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { return }
-        let selectedVoiceResponseModel = OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel)
-        guard selectedVoiceResponseModel.provider == .openAI,
-              OpenClickyModelCatalog.isSpeechModelID(selectedVoiceResponseModel.id) else { return }
-
-        realtimeVoiceInputWarmupTask = Task.detached(priority: .utility) {
-            let startedAt = Date()
-            do {
-                let engine = AVAudioEngine()
-                _ = engine.inputNode.outputFormat(forBus: 0)
-                engine.prepare()
-                try engine.start()
-                engine.stop()
-                engine.reset()
-                await MainActor.run {
-                    self.hasCompletedRealtimeVoiceInputWarmupThisLaunch = true
-                    self.realtimeVoiceInputWarmupTask = nil
-                    OpenClickyMessageLogStore.shared.append(
-                        lane: "voice",
-                        direction: "internal",
-                        event: "voice.realtime_bidirectional.input_warmed",
-                        fields: [
-                            "reason": reason,
-                            "startupDurationMs": Self.elapsedMilliseconds(since: startedAt)
-                        ]
-                    )
-                }
-            } catch {
-                await MainActor.run {
-                    self.realtimeVoiceInputWarmupTask = nil
-                    OpenClickyMessageLogStore.shared.append(
-                        lane: "voice",
-                        direction: "internal",
-                        event: "voice.realtime_bidirectional.input_warmup_failed",
-                        fields: [
-                            "reason": reason,
-                            "error": error.localizedDescription
-                        ]
-                    )
-                }
-            }
-        }
-    }
-
-    private lazy var microsoftEdgeTTSClient: MicrosoftEdgeTTSClient = {
-        return MicrosoftEdgeTTSClient(
-            voiceID: AppBundleConfiguration.microsoftEdgeVoiceID()
-        )
-    }()
-
-    lazy var openAIRealtimeSpeechClient: OpenAIRealtimeSpeechClient = {
-        return OpenAIRealtimeSpeechClient(
-            apiKey: AppBundleConfiguration.openAIAPIKey(),
-            model: selectedSpeechModel,
-            voiceID: AppBundleConfiguration.openAIRealtimeVoiceID()
-        )
-    }()
-
-    private lazy var deepgramVoiceAgentClient: DeepgramVoiceAgentClient = {
-        return DeepgramVoiceAgentClient(
-            apiKey: AppBundleConfiguration.deepgramAPIKey(),
-            voiceID: AppBundleConfiguration.deepgramTTSVoice(),
-            thinkModel: AppBundleConfiguration.deepgramVoiceAgentThinkModel()
-        )
-    }()
-
-    /// Currently selected playback engine. Persisted to UserDefaults under
-    /// `openClickyTTSProvider` for compatibility with earlier builds.
-    @Published var selectedTTSProvider: OpenClickyTTSProvider = {
-        let migrationKey = "openClickyRealtimeSpeechPlaybackMigrationV1"
-        let explicitSpeechModel = UserDefaults.standard.string(forKey: "openClickySpeechModel")
-        let rawPlaybackEngine = UserDefaults.standard.string(forKey: AppBundleConfiguration.userTTSProviderDefaultsKey)
-        if explicitSpeechModel != nil,
-           rawPlaybackEngine != OpenClickyTTSProvider.openAIRealtime.rawValue,
-           !UserDefaults.standard.bool(forKey: migrationKey) {
-            UserDefaults.standard.set(OpenClickyTTSProvider.openAIRealtime.rawValue, forKey: AppBundleConfiguration.userTTSProviderDefaultsKey)
-            UserDefaults.standard.set(true, forKey: migrationKey)
-            return .openAIRealtime
-        }
-        return OpenClickyTTSProvider.resolve(AppBundleConfiguration.ttsProviderRaw())
-    }()
-
-    /// Realtime speech/audio model selection. This is deliberately separate
-    /// from `selectedModel`, which chooses the text reasoning model for
-    /// OpenClicky's spoken replies.
-    @Published var selectedSpeechModel: String = OpenClickyModelCatalog.speechModel(
-        withID: UserDefaults.standard.string(forKey: "openClickySpeechModel")
-    ).id
-
-    /// Active TTS client for the current provider. All voice playback
-    /// paths route through this — voice response, completion narration,
-    /// short system responses, filler library. Switching providers in
-    /// Settings takes effect on the next utterance.
-    var voiceTTSClient: any OpenClickyTTSClient {
-        switch selectedTTSProvider {
-        case .openAIRealtime: return openAIRealtimeSpeechClient
-        case .elevenLabs: return elevenLabsTTSClient
-        case .cartesia:   return cartesiaTTSClient
-        case .deepgram:   return activeDeepgramTTSClient
-        case .microsoftEdge: return microsoftEdgeTTSClient
-        }
-    }
-
-    /// Logging label for the active TTS provider — used in
-    /// `markRequestStageCompleted` so request logs report the provider
-    /// that actually handled the audio (not a hardcoded "ElevenLabs").
-    var activeTTSControllerName: String {
-        switch selectedTTSProvider {
-        case .openAIRealtime: return "OpenAIRealtimeSpeechClient"
-        case .elevenLabs: return "ElevenLabsTTSClient"
-        case .cartesia:   return "CartesiaTTSClient"
-        case .deepgram:   return "DeepgramTTSClient"
-        case .microsoftEdge: return "MicrosoftEdgeTTSClient"
-        }
-    }
-
-    private var activeTTSExecutionMethodSpeakText: String {
-        switch selectedTTSProvider {
-        case .openAIRealtime: return "OpenAIRealtimeSpeechClient.speakText"
-        case .elevenLabs: return "ElevenLabsTTSClient.speakText"
-        case .cartesia:   return "CartesiaTTSClient.speakText"
-        case .deepgram:   return "DeepgramTTSClient.speakText"
-        case .microsoftEdge: return "MicrosoftEdgeTTSClient.speakText"
-        }
-    }
-
-    var activeTTSExecutionMethodBeginStreaming: String {
-        switch selectedTTSProvider {
-        case .openAIRealtime: return "OpenAIRealtimeSpeechClient.beginStreamingResponse"
-        case .elevenLabs: return "ElevenLabsTTSClient.beginStreamingResponse"
-        case .cartesia:   return "CartesiaTTSClient.beginStreamingResponse"
-        case .deepgram:   return "DeepgramTTSClient.beginStreamingResponse"
-        case .microsoftEdge: return "MicrosoftEdgeTTSClient.beginStreamingResponse"
-        }
-    }
-
-    func setDeepgramTTSVoice(_ voice: String) {
-        let trimmed = voice.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            UserDefaults.standard.removeObject(forKey: AppBundleConfiguration.userDeepgramTTSVoiceDefaultsKey)
-        } else {
-            UserDefaults.standard.set(trimmed, forKey: AppBundleConfiguration.userDeepgramTTSVoiceDefaultsKey)
-        }
-        invalidateDeepgramTTSClient(reason: "deepgram_voice_updated")
-        deepgramVoiceAgentClient.updateConfiguration(
-            apiKey: AppBundleConfiguration.deepgramAPIKey(),
-            voiceID: AppBundleConfiguration.deepgramTTSVoice(),
-            thinkModel: AppBundleConfiguration.deepgramVoiceAgentThinkModel()
-        )
-        warmDeepgramTTSClientIfActive()
-    }
-
-    func setMicrosoftEdgeVoiceID(_ voiceID: String) {
-        let trimmed = voiceID.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            UserDefaults.standard.removeObject(forKey: AppBundleConfiguration.userMicrosoftEdgeVoiceIDDefaultsKey)
-        } else {
-            UserDefaults.standard.set(trimmed, forKey: AppBundleConfiguration.userMicrosoftEdgeVoiceIDDefaultsKey)
-        }
-        microsoftEdgeTTSClient.updateConfiguration(
-            apiKey: nil,
-            voiceID: AppBundleConfiguration.microsoftEdgeVoiceID()
-        )
-        if selectedTTSProvider == .microsoftEdge {
-            FillerPhraseLibrary.shared.prepare(client: microsoftEdgeTTSClient)
-        }
-    }
-
-    func setTTSProvider(_ provider: OpenClickyTTSProvider) {
-        guard selectedTTSProvider != provider else { return }
-        // Defer the @Published mutation to the next runloop tick — the
-        // SwiftUI Picker invokes this from within a view update, and
-        // setting `selectedTTSProvider` synchronously triggers a publish
-        // mid-render ("Publishing changes from within view updates...").
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.voiceTTSClient.stopPlayback()
-            self.selectedTTSProvider = provider
-            UserDefaults.standard.set(provider.rawValue, forKey: AppBundleConfiguration.userTTSProviderDefaultsKey)
-            if provider == .deepgram {
-                self.invalidateDeepgramTTSClient(reason: "tts_provider_switched")
-            }
-            self.voiceTTSClient.warmUpConnection()
-            FillerPhraseLibrary.shared.prepare(client: self.voiceTTSClient)
-        }
-    }
-
-    func setSelectedSpeechModel(_ model: String) {
-        let resolvedModel = OpenClickyModelCatalog.speechModel(withID: model).id
-        guard selectedSpeechModel != resolvedModel else {
-            setTTSProvider(.openAIRealtime)
-            warmRealtimeVoiceInputIfNeeded(reason: "speech_model_selected")
-            return
-        }
-        selectedSpeechModel = resolvedModel
-        openAIRealtimeSpeechClient.model = resolvedModel
-        UserDefaults.standard.set(resolvedModel, forKey: "openClickySpeechModel")
-        setTTSProvider(.openAIRealtime)
-        warmRealtimeVoiceInputIfNeeded(reason: "speech_model_selected")
-    }
-
-    func setOpenAIRealtimeVoiceID(_ voiceID: String) {
-        let trimmed = voiceID.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            UserDefaults.standard.removeObject(forKey: AppBundleConfiguration.userOpenAIRealtimeVoiceIDDefaultsKey)
-        } else {
-            UserDefaults.standard.set(trimmed, forKey: AppBundleConfiguration.userOpenAIRealtimeVoiceIDDefaultsKey)
-        }
-        openAIRealtimeSpeechClient.updateConfiguration(
-            apiKey: AppBundleConfiguration.openAIAPIKey(),
-            voiceID: AppBundleConfiguration.openAIRealtimeVoiceID()
-        )
-        if selectedTTSProvider == .openAIRealtime {
-            FillerPhraseLibrary.shared.prepare(client: openAIRealtimeSpeechClient)
-        }
-    }
-
-    func setSpeculativePreFireEnabled(_ enabled: Bool) {
-        speculativePreFireEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: AppBundleConfiguration.userSpeculativePreFireDefaultsKey)
-        if !enabled { discardActiveSpeculativeFire(reason: "disabled") }
-    }
-
-    func setCartesiaAPIKey(_ apiKey: String) {
-        persistOptionalSecret(apiKey, defaultsKey: AppBundleConfiguration.userCartesiaAPIKeyDefaultsKey)
-        cartesiaTTSClient.updateConfiguration(
-            apiKey: AppBundleConfiguration.cartesiaAPIKey(),
-            voiceID: AppBundleConfiguration.cartesiaVoiceID()
-        )
-        if selectedTTSProvider == .cartesia {
-            FillerPhraseLibrary.shared.prepare(client: cartesiaTTSClient)
-        }
-    }
-
-    func setCartesiaVoiceID(_ voiceID: String) {
-        let trimmed = voiceID.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            UserDefaults.standard.removeObject(forKey: AppBundleConfiguration.userCartesiaVoiceIDDefaultsKey)
-        } else {
-            UserDefaults.standard.set(trimmed, forKey: AppBundleConfiguration.userCartesiaVoiceIDDefaultsKey)
-        }
-        cartesiaTTSClient.updateConfiguration(
-            apiKey: AppBundleConfiguration.cartesiaAPIKey(),
-            voiceID: AppBundleConfiguration.cartesiaVoiceID()
-        )
-        if selectedTTSProvider == .cartesia {
-            FillerPhraseLibrary.shared.prepare(client: cartesiaTTSClient)
-        }
-    }
 
     /// Conversation history so Claude remembers prior exchanges within a session.
     /// Each entry is the user's transcript and Claude's response.
@@ -1455,9 +992,6 @@ final class CompanionManager: ObservableObject {
     /// Guards against the realtime final-transcript callback and the
     /// realtime tool-route callback both firing for the same utterance,
     /// producing two near-identical requests ~1s apart.
-    private var lastRealtimeVoiceRouteFingerprint: String?
-    private var lastRealtimeVoiceRouteAt: Date?
-    private static let realtimeVoiceRouteDuplicateTTL: TimeInterval = 5
 
     // MARK: Speculative pre-fire state
     //
@@ -1475,35 +1009,14 @@ final class CompanionManager: ObservableObject {
     // in-flight Cartesia/ElevenLabs playback.
 
     /// Whether speculative pre-fire is enabled (Settings → Voice).
-    @Published var speculativePreFireEnabled: Bool =
-        UserDefaults.standard.bool(forKey: AppBundleConfiguration.userSpeculativePreFireDefaultsKey)
-
     private var voiceResponseCaptionsEnabled: Bool {
         UserDefaults.standard.object(forKey: AppBundleConfiguration.userVoiceResponseCaptionsEnabledDefaultsKey) as? Bool ?? false
     }
 
-    private struct SpeculativeFire {
-        let partialTranscript: String
-        let firedAt: Date
-        let task: Task<String, Error>
-        /// Tokens accumulated from the streaming response. NOT pushed
-        /// to TTS yet — held until commit (final matches) or discard.
-        var bufferedContinuation: String
-        let assistantPrefillText: String?
-        let imagesUsed: Int
-        let chosenFiller: FillerPhraseLibrary.FillerSelection?
-    }
-    private var activeSpeculativeFire: SpeculativeFire?
     /// Counter to prevent runaway re-fires when the user keeps
     /// extending a partial across many stability windows.
-    private var speculativeFireCountThisUtterance: Int = 0
-    private static let speculativeMaxFiresPerUtterance = 2
-    private static let speculativeMinWordCount = 4
     /// Last-seen partial text + arrival time, used to detect stability.
-    private var lastObservedPartial: String?
-    private var lastObservedPartialAt: Date?
     /// Scheduled re-evaluation of stability after the dwell window.
-    private var speculativeStabilityDwellTask: Task<Void, Never>?
     private var lastAgentContextSessionID: UUID?
     private var announcedAgentFileURLs: Set<String> = []
     private var pendingSystemAnnouncementTask: Task<Void, Never>?
@@ -1558,8 +1071,6 @@ final class CompanionManager: ObservableObject {
     private var accessibilityCheckTimer: Timer?
     private var pendingKeyboardShortcutStartTask: Task<Void, Never>?
     private var pendingAgentDockItemRemovalTasks: [UUID: DispatchWorkItem] = [:]
-    private var realtimeVoiceInputWarmupTask: Task<Void, Never>?
-    private var hasCompletedRealtimeVoiceInputWarmupThisLaunch = false
 
     /// Screenshot captured in parallel with audio recording. Started the
     /// instant push-to-talk is pressed so capture latency overlaps with
@@ -1579,8 +1090,6 @@ final class CompanionManager: ObservableObject {
     /// speaks again before the delay elapses.
     var transientHideTask: Task<Void, Never>?
     var voiceFollowUpStopTask: Task<Void, Never>?
-    private var pendingWakeWordRestartTask: Task<Void, Never>?
-    private var isWakeWordPausedByShortcut = false
 
     /// True when the base OpenClicky experience is ready. Camera access is
     /// deliberately excluded because Visual Intelligence and meeting notes are
@@ -1701,9 +1210,6 @@ final class CompanionManager: ObservableObject {
                 "restoredInterruptedDockItems": agentDockItems.count
             ]
         )
-        wakeWordManager.onWakeWordDetected = { [weak self] transcript in
-            self?.handleWakeWordDetected(transcript)
-        }
         // Bind the automation scheduler so cron / interval prompts can fire
         // through this CompanionManager while the app is running.
         OpenClickyAutomationStore.shared.bind(companion: self)
@@ -1787,33 +1293,19 @@ final class CompanionManager: ObservableObject {
     var lastVoiceInteractionCompletedAt: Date = .distantPast
     static let tutorObservationVoiceCooldown: TimeInterval = 90
     private var agentDockFollowTimer: Timer?
-    private var isRealtimeBidirectionalVoiceCaptureActive = false
-    private var isRealtimeBidirectionalVoiceInputReady = false
-    private var pendingRealtimeBidirectionalFinishSource: String?
-    private var realtimeBidirectionalVoiceCaptureStartedAt: Date?
-    private var realtimeBidirectionalVoiceTask: Task<Void, Never>?
-    private var realtimeBidirectionalVoiceStartedAsInterrupt = false
-    private static let quickShortcutInterruptSilenceThreshold: TimeInterval = 1.25
-    private var realtimeBidirectionalVoiceTurnGeneration: UInt64 = 0
 
     private static func initialVoiceResponseModelID() -> String {
         let defaults = UserDefaults.standard
         let storedModel = defaults.string(forKey: "selectedVoiceResponseModel")
-        let storedSpeechModel = defaults.string(forKey: "openClickySpeechModel")
 
         let requestedModel = storedModel
             ?? defaults.string(forKey: "selectedClaudeModel")
             ?? OpenClickyModelCatalog.defaultVoiceResponseModelID
         let resolvedModel = OpenClickyModelCatalog.voiceResponseModel(withID: requestedModel).id
 
-        // Persist alias migrations (e.g. gpt-realtime-2 → gpt-realtime-2.1-mini)
-        // so Settings and speech paths stop carrying retired IDs.
+        // Persist alias migrations so retired IDs are not carried forward.
         if storedModel != resolvedModel {
             defaults.set(resolvedModel, forKey: "selectedVoiceResponseModel")
-        }
-        if OpenClickyModelCatalog.isSpeechModelID(resolvedModel),
-           storedSpeechModel != resolvedModel {
-            defaults.set(resolvedModel, forKey: "openClickySpeechModel")
         }
 
         return resolvedModel
@@ -1824,45 +1316,13 @@ final class CompanionManager: ObservableObject {
         let resolvedModel = selectedVoiceResponseModel.id
         selectedModel = resolvedModel
         UserDefaults.standard.set(resolvedModel, forKey: "selectedVoiceResponseModel")
-
-        if OpenClickyModelCatalog.isSpeechModelID(resolvedModel) {
-            selectedSpeechModel = resolvedModel
-            UserDefaults.standard.set(resolvedModel, forKey: "openClickySpeechModel")
-            if selectedVoiceResponseModel.provider == .openAI {
-                openAIRealtimeSpeechClient.model = resolvedModel
-                setTTSProvider(.openAIRealtime)
-                openAIRealtimeSpeechClient.warmUpConnection()
-                warmRealtimeVoiceInputIfNeeded(reason: "voice_model_selected")
-            } else if selectedVoiceResponseModel.provider == .deepgram {
-                deepgramVoiceAgentClient.updateConfiguration(
-                    apiKey: AppBundleConfiguration.deepgramAPIKey(),
-                    voiceID: AppBundleConfiguration.deepgramTTSVoice(),
-                    thinkModel: AppBundleConfiguration.deepgramVoiceAgentThinkModel()
-                )
-                deepgramVoiceAgentClient.warmUpConnection()
-            }
-            return
-        }
-
-        if selectedTTSProvider == .openAIRealtime {
-            setTTSProvider(.cartesia)
-        }
-
         applyVoiceResponseModelSettings(selectedVoiceResponseModel)
-        if selectedVoiceResponseModel.provider == .deepgram {
-            deepgramVoiceAgentClient.warmUpConnection()
-        } else {
-            answerProviders.warmUp(for: selectedVoiceResponseModel, systemPrompt: currentVoiceResponseSystemPrompt())
-        }
+        answerProviders.warmUp(for: selectedVoiceResponseModel, systemPrompt: currentVoiceResponseSystemPrompt())
     }
 
     /// Coarse family for the bubble / notch selector (Apple / Codex / Claude).
     var selectedVoiceBackendFamily: OpenClickyVoiceBackendFamily? {
-        let model = OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel)
-        if OpenClickyModelCatalog.isSpeechModelID(model.id) {
-            return nil
-        }
-        return model.provider.voiceBackendFamily
+        OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel).provider.voiceBackendFamily
     }
 
     /// Select a terminal-first backend family, mapping to its default model.
@@ -1883,15 +1343,7 @@ final class CompanionManager: ObservableObject {
     }
 
     func applyVoiceResponseModelSettings(_ modelOption: OpenClickyModelOption) {
-        guard modelOption.provider == .deepgram else {
-            for provider in answerProviders.chain(for: modelOption) where provider.isAvailable { provider.prepare(for: modelOption) }
-            return
-        }
-        deepgramVoiceAgentClient.updateConfiguration(
-            apiKey: AppBundleConfiguration.deepgramAPIKey(),
-            voiceID: AppBundleConfiguration.deepgramTTSVoice(),
-            thinkModel: AppBundleConfiguration.deepgramVoiceAgentThinkModel()
-        )
+        for provider in answerProviders.chain(for: modelOption) where provider.isAvailable { provider.prepare(for: modelOption) }
     }
 
     func setSelectedComputerUseBackend(_ backendID: String) {
@@ -1985,7 +1437,7 @@ final class CompanionManager: ObservableObject {
                             "target": "Reminders"
                         ]
                     )
-                    self.speakShortSystemResponse("Reminders automation is ready.")
+                    self.showShortSystemResponse("Reminders automation is ready.")
                 } else {
                     OpenClickyMessageLogStore.shared.append(
                         lane: "computer-use",
@@ -1997,7 +1449,7 @@ final class CompanionManager: ObservableObject {
                         ]
                     )
                     self.openAutomationSettings()
-                    self.speakShortSystemResponse(Self.nativeAutomationErrorMessage(appName: "Reminders", result: result))
+                    self.showShortSystemResponse(Self.nativeAutomationErrorMessage(appName: "Reminders", result: result))
                 }
             }
         }
@@ -2025,7 +1477,7 @@ final class CompanionManager: ObservableObject {
                     "target": "System Events"
                 ]
             )
-            speakShortSystemResponse("System Events automation is ready.")
+            showShortSystemResponse("System Events automation is ready.")
         } else {
             OpenClickyMessageLogStore.shared.append(
                 lane: "computer-use",
@@ -2037,7 +1489,7 @@ final class CompanionManager: ObservableObject {
                 ]
             )
             openAutomationSettings()
-            speakShortSystemResponse("System Events automation needs approval in Privacy & Security, Automation.")
+            showShortSystemResponse("System Events automation needs approval in Privacy & Security, Automation.")
         }
     }
 
@@ -2121,53 +1573,6 @@ final class CompanionManager: ObservableObject {
         claudeAPI.setAPIKey(AppBundleConfiguration.anthropicAPIKey())
     }
 
-    func setElevenLabsAPIKey(_ apiKey: String) {
-        persistOptionalSecret(apiKey, defaultsKey: AppBundleConfiguration.userElevenLabsAPIKeyDefaultsKey)
-        elevenLabsTTSClient.updateConfiguration(
-            apiKey: AppBundleConfiguration.elevenLabsAPIKey(),
-            voiceID: AppBundleConfiguration.elevenLabsVoiceID()
-        )
-    }
-
-    func setElevenLabsVoiceID(_ voiceID: String) {
-        persistOptionalSecret(voiceID, defaultsKey: AppBundleConfiguration.userElevenLabsVoiceIDDefaultsKey)
-        elevenLabsTTSClient.updateConfiguration(
-            apiKey: AppBundleConfiguration.elevenLabsAPIKey(),
-            voiceID: AppBundleConfiguration.elevenLabsVoiceID()
-        )
-    }
-
-    func setAssemblyAIAPIKey(_ apiKey: String) {
-        persistOptionalSecret(apiKey, defaultsKey: AppBundleConfiguration.userAssemblyAIAPIKeyDefaultsKey)
-        buddyDictationManager.setTranscriptionProvider(buddyDictationManager.transcriptionProviderID)
-    }
-
-    func setDeepgramAPIKey(_ apiKey: String) {
-        persistOptionalSecret(apiKey, defaultsKey: AppBundleConfiguration.userDeepgramAPIKeyDefaultsKey)
-        buddyDictationManager.setTranscriptionProvider(buddyDictationManager.transcriptionProviderID)
-        invalidateDeepgramTTSClient(reason: "deepgram_key_updated")
-        deepgramVoiceAgentClient.updateConfiguration(
-            apiKey: AppBundleConfiguration.deepgramAPIKey(),
-            voiceID: AppBundleConfiguration.deepgramTTSVoice(),
-            thinkModel: AppBundleConfiguration.deepgramVoiceAgentThinkModel()
-        )
-        warmDeepgramTTSClientIfActive()
-    }
-
-    func setDeepgramVoiceAgentThinkModel(_ model: String) {
-        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            UserDefaults.standard.removeObject(forKey: AppBundleConfiguration.userDeepgramVoiceAgentThinkModelDefaultsKey)
-        } else {
-            UserDefaults.standard.set(AppBundleConfiguration.normalizeDeepgramVoiceAgentThinkModel(trimmed), forKey: AppBundleConfiguration.userDeepgramVoiceAgentThinkModelDefaultsKey)
-        }
-        deepgramVoiceAgentClient.updateConfiguration(
-            apiKey: AppBundleConfiguration.deepgramAPIKey(),
-            voiceID: AppBundleConfiguration.deepgramTTSVoice(),
-            thinkModel: AppBundleConfiguration.deepgramVoiceAgentThinkModel()
-        )
-    }
-
     func setVoiceTranscriptionProvider(_ providerID: String) {
         buddyDictationManager.setTranscriptionProvider(providerID)
     }
@@ -2175,10 +1580,6 @@ final class CompanionManager: ObservableObject {
     func setCodexAgentAPIKey(_ apiKey: String) {
         persistOptionalSecret(apiKey, defaultsKey: AppBundleConfiguration.userCodexAgentAPIKeyDefaultsKey)
         openAIAPI.setAPIKey(AppBundleConfiguration.openAIAPIKey())
-        openAIRealtimeSpeechClient.updateConfiguration(
-            apiKey: AppBundleConfiguration.openAIAPIKey(),
-            voiceID: openAIRealtimeSpeechClient.voiceID
-        )
         codexAgentSessions.forEach { $0.stop(reason: "api_key_reconfigured") }
     }
 
@@ -2194,10 +1595,6 @@ final class CompanionManager: ObservableObject {
         : UserDefaults.standard.bool(forKey: "isClickyCursorEnabled")
 
     @Published var isActivationShortcutEnabled: Bool = true
-    @Published var voiceActivationMode: OpenClickyVoiceActivationMode = OpenClickyVoiceActivationMode.resolved(
-        rawValue: UserDefaults.standard.string(forKey: AppBundleConfiguration.userVoiceActivationModeDefaultsKey)
-    )
-
     func setClickyCursorEnabled(_ enabled: Bool) {
         isClickyCursorEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: "isClickyCursorEnabled")
@@ -2215,26 +1612,6 @@ final class CompanionManager: ObservableObject {
     func setActivationShortcutEnabled(_ enabled: Bool) {
         isActivationShortcutEnabled = enabled
         globalPushToTalkShortcutMonitor.setActivationShortcutEnabled(enabled)
-        if !enabled {
-            isWakeWordPausedByShortcut = true
-            wakeWordManager.stop(reason: "activation_shortcut_disabled")
-        } else {
-            isWakeWordPausedByShortcut = false
-            startWakeWordListeningIfNeeded(reason: "activation_shortcut_enabled")
-        }
-    }
-
-    func setVoiceActivationMode(_ mode: OpenClickyVoiceActivationMode) {
-        guard voiceActivationMode != mode else { return }
-        voiceActivationMode = mode
-        UserDefaults.standard.set(mode.rawValue, forKey: AppBundleConfiguration.userVoiceActivationModeDefaultsKey)
-        if mode.usesWakeWord {
-            isWakeWordPausedByShortcut = false
-            startWakeWordListeningIfNeeded(reason: "mode_changed")
-        } else {
-            isWakeWordPausedByShortcut = false
-            wakeWordManager.stop(reason: "push_to_talk_mode")
-        }
     }
 
     /// Whether the user has completed onboarding at least once. Persisted
@@ -2253,21 +1630,9 @@ final class CompanionManager: ObservableObject {
         print("OpenClicky runtime identity - bundleID: \(Bundle.main.bundleIdentifier ?? "unknown"), appPath: \(Bundle.main.bundleURL.path)")
         print("OpenClicky start - accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), screenContent: \(hasScreenContentPermission), fullDiskAccess: \(hasFullDiskAccessPermission), onboarded: \(hasCompletedOnboarding)")
         startPermissionPolling()
-        if runtimeMode == .menuBar {
-            notchCaptureWindowManager.showPersistentPill(
-                companionManager: self,
-                submitText: { [weak self] submittedText in
-                    self?.submitTextModePrompt(submittedText)
-                }
-            )
-        }
         bindVoiceStateObservation()
         bindAudioPowerLevel()
         bindShortcutTransitions()
-        if voiceActivationMode == .alwaysWakeWord {
-            isWakeWordPausedByShortcut = false
-            startWakeWordListeningIfNeeded(reason: "startup")
-        }
         bindAgentSessionObservation()
         if runtimeMode == .menuBar { refreshCompanionTaskIcons() }
         startRelaunchableAgentAutoResumeChecks()
@@ -2278,38 +1643,8 @@ final class CompanionManager: ObservableObject {
         if runtimeMode == .menuBar && isTutorModeEnabled {
             startTutorIdleObservation()
         }
-        let selectedVoiceResponseModel = OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel)
-        switch selectedVoiceResponseModel.provider {
-        case .openAI where OpenClickyModelCatalog.isSpeechModelID(selectedVoiceResponseModel.id):
-            selectedSpeechModel = selectedVoiceResponseModel.id
-            openAIRealtimeSpeechClient.model = selectedVoiceResponseModel.id
-            selectedTTSProvider = .openAIRealtime
-            UserDefaults.standard.set(OpenClickyTTSProvider.openAIRealtime.rawValue, forKey: AppBundleConfiguration.userTTSProviderDefaultsKey)
-            UserDefaults.standard.set(selectedVoiceResponseModel.id, forKey: "openClickySpeechModel")
-            openAIRealtimeSpeechClient.warmUpConnection()
-            warmRealtimeVoiceInputIfNeeded(reason: "startup")
-        case .deepgram:
-            selectedSpeechModel = selectedVoiceResponseModel.id
-            UserDefaults.standard.set(selectedVoiceResponseModel.id, forKey: "openClickySpeechModel")
-            deepgramVoiceAgentClient.updateConfiguration(
-                apiKey: AppBundleConfiguration.deepgramAPIKey(),
-                voiceID: AppBundleConfiguration.deepgramTTSVoice(),
-                thinkModel: AppBundleConfiguration.deepgramVoiceAgentThinkModel()
-            )
-            deepgramVoiceAgentClient.warmUpConnection()
-        default:
-            answerProviders.warmUp(for: selectedVoiceResponseModel, systemPrompt: currentVoiceResponseSystemPrompt())
-        }
-        // Force-init the active TTS provider and prime its TLS
-        // handshake. The first sentence's TTS request would otherwise
-        // pay the cold-connect tax synchronously inside the streaming
-        // pipeline. We warm the active provider only — switching
-        // providers in Settings re-warms.
-        voiceTTSClient.warmUpConnection()
-        // Generate (or load from disk) the pre-baked filler phrases
-        // for the active provider's voice. Switching providers
-        // re-prepares the cache.
-        FillerPhraseLibrary.shared.prepare(client: voiceTTSClient)
+        answerProviders.warmUp(for: OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel),
+                               systemPrompt: currentVoiceResponseSystemPrompt())
 
         // If the user already completed onboarding AND all permissions are
         // still granted, show the cursor overlay immediately. If permissions
@@ -2348,64 +1683,6 @@ final class CompanionManager: ObservableObject {
         onboardingMusicFadeTimer = nil
         onboardingMusicPlayer?.stop()
         onboardingMusicPlayer = nil
-    }
-
-    private func startOnboardingMusic() {
-        stopOnboardingMusic()
-        guard let musicURL = Bundle.main.url(forResource: "ff", withExtension: "mp3") else {
-            print("⚠️ OpenClicky: ff.mp3 not found in bundle")
-            return
-        }
-
-        do {
-            let player = try AVAudioPlayer(contentsOf: musicURL)
-            player.volume = 0.3
-            player.play()
-            self.onboardingMusicPlayer = player
-
-            // After 1m 30s, fade the music out over 3s
-            onboardingMusicFadeTimer = Timer.scheduledTimer(withTimeInterval: 90.0, repeats: false) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.fadeOutOnboardingMusic()
-                }
-            }
-        } catch {
-            print("⚠️ OpenClicky: Failed to play onboarding music: \(error)")
-        }
-    }
-
-    private func fadeOutOnboardingMusic() {
-        guard let player = onboardingMusicPlayer else { return }
-
-        let fadeSteps = 30
-        let fadeDuration: Double = 3.0
-        let stepInterval = fadeDuration / Double(fadeSteps)
-        onboardingMusicFadeStepsRemaining = fadeSteps
-        onboardingMusicFadeVolumeDecrement = player.volume / Float(fadeSteps)
-
-        onboardingMusicFadeTimer = Timer.scheduledTimer(withTimeInterval: stepInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.advanceOnboardingMusicFade()
-            }
-        }
-    }
-
-    private func advanceOnboardingMusicFade() {
-        guard let player = onboardingMusicPlayer else {
-            onboardingMusicFadeTimer?.invalidate()
-            onboardingMusicFadeTimer = nil
-            return
-        }
-
-        onboardingMusicFadeStepsRemaining -= 1
-        player.volume -= onboardingMusicFadeVolumeDecrement
-
-        if onboardingMusicFadeStepsRemaining <= 0 {
-            onboardingMusicFadeTimer?.invalidate()
-            player.stop()
-            onboardingMusicPlayer = nil
-            onboardingMusicFadeTimer = nil
-        }
     }
 
     func clearDetectedElementLocation() {
@@ -2541,13 +1818,6 @@ final class CompanionManager: ObservableObject {
         showCursorOverlayIfAvailable()
     }
 
-    private func moveExternalSecondaryCursor(_ id: UUID, to point: CGPoint) {
-        guard let index = cursorOverlayState.externalSecondaryCursors.firstIndex(where: { $0.id == id }) else { return }
-        var cursors = cursorOverlayState.externalSecondaryCursors
-        cursors[index].screenLocation = Self.clampedExternalCursorPoint(point)
-        cursorOverlayState.externalSecondaryCursors = cursors
-    }
-
     private func agentDockSpawnProxyTargetPoint(from startPoint: CGPoint) -> CGPoint {
         let screen = agentDockTargetScreen()
             ?? NSScreen.screen(containingOrNearestTo: startPoint)
@@ -2579,19 +1849,6 @@ final class CompanionManager: ObservableObject {
 
     private static func clampedExternalCursorPoint(_ point: CGPoint) -> CGPoint {
         NSScreen.pointClampedToDesktop(point)
-    }
-
-    private static func quartzCursorPoint(fromAppKitScreenPoint point: CGPoint) -> CGPoint {
-        let targetScreen = NSScreen.screen(containingOrNearestTo: point)
-        guard let frame = targetScreen?.frame else { return point }
-
-        // Public bridge coordinates use AppKit/NSEvent space (global desktop,
-        // origin at bottom-left). CGWarpMouseCursorPosition expects Quartz
-        // display coordinates for the target display (Y axis flipped). Convert
-        // here so /cursor x/y matches what agents read from screenshots/AppKit.
-        let localY = point.y - frame.minY
-        let quartzY = frame.minY + (frame.height - localY)
-        return CGPoint(x: point.x, y: quartzY)
     }
 
     private func clearExternalPrimaryCaption() {
@@ -2895,7 +2152,7 @@ final class CompanionManager: ObservableObject {
             ]
         )
 
-        speakShortSystemResponse(Self.visualGuidanceCalibrationSampleAcknowledgement(for: caption))
+        showShortSystemResponse(Self.visualGuidanceCalibrationSampleAcknowledgement(for: caption))
         return true
     }
 
@@ -3228,55 +2485,25 @@ final class CompanionManager: ObservableObject {
         ])
     }
 
-    private func speakExternalProxyText(_ text: String, interrupt: Bool) -> OpenClickyExternalControlResponse {
+    /// Spoken output was removed, so external "speak" requests show their text by the pointer instead.
+    private func speakExternalProxyText(_ text: String, interrupt _: Bool) -> OpenClickyExternalControlResponse {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .error(400, "Missing text") }
-        if voiceTTSClient.isPlaying {
-            guard interrupt else {
-                return .error(409, "OpenClicky voice is already playing; retry or pass interrupt=true")
-            }
-            voiceTTSClient.stopPlayback()
-        }
-
-        Task { @MainActor [weak self] in
-            OpenClickyMessageLogStore.shared.append(
-                lane: "voice",
-                direction: "outgoing",
-                event: "external_control.speak.started",
-                fields: ["textLength": trimmed.count]
-            )
-            do {
-                try await self?.voiceTTSClient.speakText(trimmed)
-            } catch {
-                OpenClickyMessageLogStore.shared.append(
-                    lane: "voice",
-                    direction: "error",
-                    event: "external_control.speak.failed",
-                    fields: ["error": error.localizedDescription]
-                )
-            }
-        }
-        return .accepted(["speaking": true, "textLength": trimmed.count])
+        beginCursorReplyPresentation()
+        updateVoiceResponseCaption("<cursor_reply>" + trimmed + "</cursor_reply>", force: true, updatesDock: false)
+        return .accepted(["shown": true, "textLength": trimmed.count])
     }
 
     func stop() {
         globalPushToTalkShortcutMonitor.stop()
-        wakeWordManager.stop(reason: "companion_stop")
         buddyDictationManager.cancelCurrentDictation()
         cancelCircleSelectSession()
         overlayWindowManager.hideOverlay()
         transientHideTask?.cancel()
-        pendingWakeWordRestartTask?.cancel()
-        pendingWakeWordRestartTask = nil
 
         currentResponseTask?.cancel()
         currentResponseTask = nil
         currentResponseTaskToken = nil
-        realtimeBidirectionalVoiceTask?.cancel()
-        realtimeBidirectionalVoiceTask = nil
-        realtimeBidirectionalVoiceTurnGeneration &+= 1
-        openAIRealtimeSpeechClient.cancelBidirectionalVoiceTurn()
-        voiceTTSClient.cancelBidirectionalVoiceTurn()
         claudeCodeCLI?.stop()
         codexVoiceSession.stop()
         codexAgentSessions.forEach { $0.stop(reason: "companion_stop") }
@@ -3370,7 +2597,6 @@ final class CompanionManager: ObservableObject {
         }
         if !previouslyHadMicrophone && hasMicrophonePermission {
             ClickyAnalytics.trackPermissionGranted(permission: "microphone")
-            warmRealtimeVoiceInputIfNeeded(reason: "microphone_permission_granted")
         }
         if !previouslyHadFullDiskAccess && hasFullDiskAccessPermission {
             ClickyAnalytics.trackPermissionGranted(permission: "full_disk_access")
@@ -3383,11 +2609,6 @@ final class CompanionManager: ObservableObject {
             ClickyAnalytics.trackAllPermissionsGranted()
         }
 
-        if hasMicrophonePermission, voiceActivationMode == .alwaysWakeWord {
-            startWakeWordListeningIfNeeded(reason: "permissions_refreshed")
-        } else if !hasMicrophonePermission {
-            wakeWordManager.stop(reason: "microphone_permission_missing")
-        }
     }
 
     /// Triggers the macOS screen content picker by performing a dummy
@@ -3509,17 +2730,6 @@ final class CompanionManager: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isKeyboardRecording, isMicrophoneButtonRecording, isFinalizing, isPreparing in
                 guard let self else { return }
-                // Realtime/Voice Agent microphone capture bypasses
-                // BuddyDictationManager, so its recording flags stay false
-                // while macOS is genuinely using the mic. Do not let this
-                // observer flip the cursor back to idle during that direct
-                // capture path.
-                if self.isRealtimeBidirectionalVoiceCaptureActive {
-                    if self.voiceState != .responding {
-                        self.voiceState = .listening
-                    }
-                    return
-                }
 
                 // Don't let an old speaking state mask a real microphone
                 // capture. Push-to-talk can interrupt speech and immediately
@@ -3605,7 +2815,6 @@ final class CompanionManager: ObservableObject {
                     self.cancelPendingAgentDockItemRemoval(for: sessionID)
                 }
                 self.updateAgentDockItem(for: sessionID, status: status)
-                self.refreshNotchAgentLiveActivity()
                 self.scheduleStatusSync()
                 self.scheduleRelaunchableAgentSessionsPersist()
                 self.updateAgentProgressNarration()
@@ -3627,7 +2836,6 @@ final class CompanionManager: ObservableObject {
         agentProgressStageCancellables[session.id] = session.$progressStage
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.refreshNotchAgentLiveActivity()
                 self?.scheduleRelaunchableAgentSessionsPersist()
             }
 
@@ -3635,13 +2843,8 @@ final class CompanionManager: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, sessionID = session.id] title in
                 self?.updateAgentDockTitle(for: sessionID, title: title)
-                self?.refreshNotchAgentLiveActivity()
                 self?.scheduleRelaunchableAgentSessionsPersist()
             }
-    }
-
-    private func refreshNotchAgentLiveActivity() {
-        notchCaptureWindowManager.updateAgentLiveActivity(companionManager: self)
     }
 
     private func persistRelaunchableAgentSessions() {
@@ -3717,7 +2920,6 @@ final class CompanionManager: ObservableObject {
             updateAgentDockItem(for: session.id, status: session.status)
             session.resumeInterruptedTaskAfterRelaunch()
         }
-        refreshNotchAgentLiveActivity()
         scheduleStatusSync()
         scheduleRelaunchableAgentSessionsPersist()
     }
@@ -3743,7 +2945,6 @@ final class CompanionManager: ObservableObject {
                 self.pendingAgentActivityRefreshTasks[sessionID] = nil
                 guard let session = self.codexAgentSessions.first(where: { $0.id == sessionID }) else { return }
                 self.updateAgentDockItem(for: sessionID, status: session.status)
-                self.refreshNotchAgentLiveActivity()
                 self.scheduleStatusSync()
                 self.updateAgentProgressNarration()
             }
@@ -3818,7 +3019,7 @@ final class CompanionManager: ObservableObject {
 
         announcedAgentFileURLs.insert(eventKey)
         openOpenClickyDocument(standardizedURL)
-        speakShortSystemResponse("\(session.spokenAgentSentenceName) says it found \(Self.spokenFileName(for: standardizedURL)), showing it now.")
+        showShortSystemResponse("\(session.spokenAgentSentenceName) says it found \(Self.spokenFileName(for: standardizedURL)), showing it now.")
     }
 
     private static func isMarkdownDocument(_ url: URL) -> Bool {
@@ -3891,7 +3092,6 @@ final class CompanionManager: ObservableObject {
             agentDockWindowManager.hide()
         }
         refreshAgentDockFollowBehavior()
-        refreshNotchAgentLiveActivity()
         if activeCodexAgentSessionID == sessionID {
             if let next = codexAgentSessions.first(where: { !archivedSessionIDs.contains($0.id) }) {
                 selectCodexAgentSession(next.id)
@@ -3991,7 +3191,6 @@ final class CompanionManager: ObservableObject {
                 "title": closingSession.title
             ]
         )
-        refreshNotchAgentLiveActivity()
         scheduleStatusSync()
         persistRelaunchableAgentSessions()
     }
@@ -4175,45 +3374,19 @@ final class CompanionManager: ObservableObject {
             "executor": "voice_response",
             "model": executionModel.id,
             "modelProvider": executionModel.provider.rawValue,
-            "maxOutputTokens": executionModel.maxOutputTokens,
-            "playbackEngine": selectedTTSProvider.rawValue,
-            "playbackController": activeTTSControllerName,
-            "speechModel": selectedSpeechModel,
-            "speechVoice": activeRealtimeSpeechVoiceID
+            "maxOutputTokens": executionModel.maxOutputTokens
         ]
 
         if executionModel.id != selectedVoiceResponseModel.id {
             fields["selectedVoiceResponseModel"] = selectedVoiceResponseModel.id
             fields["visualAnalysisModel"] = executionModel.id
-            fields["realtimeVisualPathOverride"] = OpenClickyModelCatalog.isSpeechModelID(selectedVoiceResponseModel.id)
         }
 
-        if OpenClickyModelCatalog.isSpeechModelID(executionModel.id) {
-            fields["executionMethod"] = "OpenAIRealtimeSpeechClient.beginBidirectionalVoiceTurn"
-            fields["authMode"] = "openai_api_key_primary"
-            fields["transport"] = "realtime_websocket"
-            fields["streamingMethod"] = "input_audio_buffer.append + response.output_audio.delta"
-            fields["inputPath"] = "realtime_input_audio_buffer"
-            fields["bypassesWhisper"] = true
-            fields["playbackEngine"] = OpenClickyTTSProvider.openAIRealtime.rawValue
-            fields["speechModel"] = executionModel.id
-        } else if executionModel.provider == .deepgram {
-            fields["executionMethod"] = "DeepgramVoiceAgentClient.beginBidirectionalVoiceTurn"
-            fields["authMode"] = "deepgram_api_key_primary"
-            fields["transport"] = "deepgram_voice_agent_websocket"
-            fields["streamingMethod"] = "binary PCM in/out + ConversationText"
-            fields["inputPath"] = "deepgram_voice_agent_pcm_stream"
-            fields["bypassesWhisper"] = true
-            fields["playbackEngine"] = "deepgram_voice_agent"
-            fields["speechVoice"] = deepgramVoiceAgentClient.voiceID
-            fields["thinkModel"] = deepgramVoiceAgentClient.thinkModel
-        } else {
-            // Reports the provider that will actually answer, in fallback order.
-            let available = answerProviders.chain(for: executionModel).filter(\.isAvailable)
-            fields["provider"] = available.first?.id ?? "none"
-            fields["billing"] = available.first.map { String(describing: $0.billing) } ?? "none"
-            fields["fallbackProviders"] = available.dropFirst().map(\.id).joined(separator: ",")
-        }
+        // Reports the provider that will actually answer, in fallback order.
+        let available = answerProviders.chain(for: executionModel).filter(\.isAvailable)
+        fields["provider"] = available.first?.id ?? "none"
+        fields["billing"] = available.first.map { String(describing: $0.billing) } ?? "none"
+        fields["fallbackProviders"] = available.dropFirst().map(\.id).joined(separator: ",")
 
         return fields
     }
@@ -4230,13 +3403,9 @@ final class CompanionManager: ObservableObject {
     }
 
     private func handleEscapeKeyPressed() {
-        let isVoiceActive = voiceTTSClient.isPlaying
-            || openAIRealtimeSpeechClient.isPlaying
-            || deepgramVoiceAgentClient.isPlaying
-            || voiceState == .responding
+        let isVoiceActive = voiceState == .responding
             || voiceState == .processing
             || currentResponseTask != nil
-            || realtimeBidirectionalVoiceTask != nil
         guard isVoiceActive || responseOverlayManager.isVisible || hasActiveOverlayAnnotation else { return }
         cancelCircleSelectSession(clearPending: true)
         dismissCoachingOverlays()
@@ -4245,11 +3414,6 @@ final class CompanionManager: ObservableObject {
     private func handleShortcutTransition(_ transition: BuddyPushToTalkShortcut.ShortcutTransition) {
         switch transition {
         case .pressed:
-            if voiceActivationMode.usesWakeWord {
-                guard !showOnboardingVideo else { return }
-                toggleWakeWordListeningFromShortcut()
-                return
-            }
             guard !buddyDictationManager.isDictationInProgress else { return }
             // Don't register push-to-talk while the onboarding video is playing
             guard !showOnboardingVideo else { return }
@@ -4278,14 +3442,8 @@ final class CompanionManager: ObservableObject {
                     self.onboardingPromptText = ""
                 }
             }
-    
 
             ClickyAnalytics.trackPushToTalkStarted()
-
-            // Reset speculative-fire counters so this utterance starts
-            // with a clean budget. The previous turn's state cannot
-            // influence this one.
-            resetSpeculativeFireForNewUtterance()
 
             // Kick off the screenshot the moment the key goes down so it
             // captures in parallel with audio recording instead of blocking
@@ -4294,10 +3452,6 @@ final class CompanionManager: ObservableObject {
             beginCircleSelectSessionIfEnabled()
 
             pendingKeyboardShortcutStartTask?.cancel()
-            if shouldUseBidirectionalRealtimeVoiceInput {
-                startBidirectionalRealtimeVoiceCapture(source: "keyboardShortcut")
-                return
-            }
 
             clearDetectedElementLocation()
             liveHandledComputerUseFingerprints.removeAll()
@@ -4325,9 +3479,6 @@ final class CompanionManager: ObservableObject {
                 )
             }
         case .released:
-            if voiceActivationMode.usesWakeWord {
-                return
-            }
             // Cancel the pending start task in case the user released the shortcut
             // before the async startPushToTalk had a chance to begin recording.
             // Without this, a quick press-and-release drops the release event and
@@ -4336,9 +3487,6 @@ final class CompanionManager: ObservableObject {
             finishCircleSelectSessionForVoiceTurn()
             pendingKeyboardShortcutStartTask?.cancel()
             pendingKeyboardShortcutStartTask = nil
-            if finishBidirectionalRealtimeVoiceCaptureIfNeeded(source: "keyboardShortcut") {
-                return
-            }
             // Keep the prewarmed screenshot — even on a quick press the user
             // may still produce a final transcript (e.g. wake-word). The
             // freshness check in the consumer discards stale captures.
@@ -4533,653 +3681,14 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    var shouldUseBidirectionalRealtimeVoiceInput: Bool {
-        OpenClickyModelCatalog.isSpeechModelID(selectedModel)
-    }
-
-    private var activeRealtimeSpeechVoiceID: String {
-        let model = OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel)
-        return model.provider == .deepgram ? deepgramVoiceAgentClient.voiceID : openAIRealtimeSpeechClient.voiceID
-    }
-
-    private var activeRealtimeInputPath: String {
-        let model = OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel)
-        return model.provider == .deepgram ? "deepgram_voice_agent_pcm_stream" : "realtime_input_audio_buffer"
-    }
-
-    private var activeRealtimeThinkModel: String {
-        let model = OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel)
-        return model.provider == .deepgram ? deepgramVoiceAgentClient.thinkModel : openAIRealtimeSpeechClient.model
-    }
-
-    private func toggleWakeWordListeningFromShortcut() {
-        guard isActivationShortcutEnabled else { return }
-        if wakeWordManager.isListening || wakeWordManager.isStarting {
-            isWakeWordPausedByShortcut = true
-            wakeWordManager.stop(reason: "activation_shortcut_toggle_off")
-            return
-        }
-        isWakeWordPausedByShortcut = false
-        startWakeWordListeningIfNeeded(reason: "activation_shortcut_toggle_on")
-    }
-
-    private func startWakeWordListeningIfNeeded(reason: String) {
-        guard voiceActivationMode.usesWakeWord,
-              isActivationShortcutEnabled,
-              !isWakeWordPausedByShortcut,
-              voiceState == .idle,
-              !buddyDictationManager.isDictationInProgress,
-              !isRealtimeBidirectionalVoiceCaptureActive,
-              !voiceTTSClient.isPlaying,
-              !openAIRealtimeSpeechClient.isPlaying,
-              !deepgramVoiceAgentClient.isPlaying,
-              !wakeWordManager.isListening,
-              !wakeWordManager.isStarting else {
-            return
-        }
-
-        pendingWakeWordRestartTask?.cancel()
-        pendingWakeWordRestartTask = nil
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "voice.wake_listener.start_requested",
-            fields: [
-                "reason": reason,
-                "mode": voiceActivationMode.rawValue
-            ]
-        )
-        Task { [weak self] in
-            await self?.wakeWordManager.start()
-        }
-    }
-
-    private func scheduleWakeWordListeningResumeIfNeeded(reason: String) {
-        guard voiceActivationMode.usesWakeWord else { return }
-        pendingWakeWordRestartTask?.cancel()
-        pendingWakeWordRestartTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(450))
-            await MainActor.run {
-                guard let self else { return }
-                self.pendingWakeWordRestartTask = nil
-                self.startWakeWordListeningIfNeeded(reason: reason)
-            }
-        }
-    }
-
-    private func handleWakeWordDetected(_ transcript: String) {
-        guard voiceActivationMode.usesWakeWord else { return }
-
-        transientHideTask?.cancel()
-        transientHideTask = nil
-        voiceFollowUpStopTask?.cancel()
-        voiceFollowUpStopTask = nil
-        wakeWordAudioDucker.duck(reason: "wake_word_detected")
-        resetSpeculativeFireForNewUtterance()
-        startPrewarmedScreenshotCaptureIfPossible()
-        showCursorOverlayIfAvailable()
-        NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
-
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "voice.wake_word.turn_started",
-            fields: [
-                "mode": voiceActivationMode.rawValue,
-                "wakeTranscriptLength": transcript.count
-            ]
-        )
-
-        if shouldUseBidirectionalRealtimeVoiceInput {
-            startBidirectionalRealtimeVoiceCapture(source: "wakeWord")
-            voiceFollowUpStopTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
-                await MainActor.run {
-                    guard let self else { return }
-                    self.voiceFollowUpStopTask = nil
-                    _ = self.finishBidirectionalRealtimeVoiceCaptureIfNeeded(source: "wakeWord")
-                }
-            }
-            return
-        }
-
-        clearDetectedElementLocation()
-        liveHandledComputerUseFingerprints.removeAll()
-        Task { [weak self] in
-            guard let self else { return }
-            await self.buddyDictationManager.startAutoSubmittingDictationFromMicrophoneButton(
-                currentDraftText: "",
-                updateDraftText: { _ in },
-                submitDraftText: { [weak self] finalTranscript in
-                    self?.wakeWordAudioDucker.restore(reason: "wake_word_dictation_completed")
-                    self?.handleFinalVoiceTranscript(finalTranscript)
-                },
-                onWillStartRecording: { [weak self] in
-                    self?.interruptCurrentVoiceResponse()
-                }
-            )
-        }
-        voiceFollowUpStopTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 8_000_000_000)
-            await MainActor.run {
-                guard let self else { return }
-                self.voiceFollowUpStopTask = nil
-                self.buddyDictationManager.stopPersistentDictationFromMicrophoneButton()
-                self.wakeWordAudioDucker.restore(reason: "wake_word_dictation_timeout")
-            }
-        }
-    }
-
-    private struct BidirectionalRealtimeVoiceResult {
-        let userTranscript: String
-        let assistantTranscript: String
-        let didCreateAssistantResponse: Bool
-        let wasRoutedByClient: Bool
-    }
-
-    func startBidirectionalRealtimeVoiceCapture(source: String) {
-        guard !isRealtimeBidirectionalVoiceCaptureActive else {
-            wakeWordAudioDucker.restore(reason: "realtime_start_already_active")
-            return
-        }
-        let audioPlaybackActive = voiceTTSClient.isPlaying || openAIRealtimeSpeechClient.isPlaying || deepgramVoiceAgentClient.isPlaying
-        if voiceState == .responding, !audioPlaybackActive {
-            OpenClickyMessageLogStore.shared.append(
-                lane: "voice",
-                direction: "internal",
-                event: "voice.state.stale_responding_recovered",
-                fields: [
-                    "source": source,
-                    "speechModel": selectedModel,
-                    "speechVoice": activeRealtimeSpeechVoiceID,
-                    "inputPath": activeRealtimeInputPath
-                ]
-            )
-            clearVoiceResponseCaptionAndInteractiveBubble()
-            currentAudioPowerLevel = 0
-            voiceState = .idle
-        }
-        let isPlayingResponse = audioPlaybackActive
-        let startedAsInterrupt = isPlayingResponse || voiceState == .processing
-        if startedAsInterrupt {
-            let priorVoiceState = voiceState
-            OpenClickyMessageLogStore.shared.append(
-                lane: "voice",
-                direction: "internal",
-                event: "voice.realtime_bidirectional.previous_turn_interrupted",
-                fields: [
-                    "source": source,
-                    "speechModel": selectedModel,
-                    "speechVoice": activeRealtimeSpeechVoiceID,
-                    "inputPath": activeRealtimeInputPath,
-                    "voiceState": priorVoiceState.rawValue,
-                    "ttsPlaying": voiceTTSClient.isPlaying,
-                    "openAIRealtimePlaying": openAIRealtimeSpeechClient.isPlaying,
-                    "deepgramVoiceAgentPlaying": deepgramVoiceAgentClient.isPlaying,
-                    "reason": isPlayingResponse ? "previous_voice_turn_still_speaking" : "previous_voice_turn_still_processing"
-                ]
-            )
-            interruptCurrentVoiceResponse()
-        }
-
-        clearDetectedElementLocation()
-        liveHandledComputerUseFingerprints.removeAll()
-        isRealtimeBidirectionalVoiceCaptureActive = true
-        isRealtimeBidirectionalVoiceInputReady = false
-        pendingRealtimeBidirectionalFinishSource = nil
-        realtimeBidirectionalVoiceCaptureStartedAt = Date()
-        realtimeBidirectionalVoiceStartedAsInterrupt = startedAsInterrupt
-        voiceState = .listening
-        currentAudioPowerLevel = 0
-        latestVoiceResponseCard = nil
-        showCursorOverlayIfAvailable()
-
-        realtimeBidirectionalVoiceTurnGeneration &+= 1
-        let turnGeneration = realtimeBidirectionalVoiceTurnGeneration
-        let startedAt = Date()
-        let historyForAPI = voiceConversationHistoryForAPI()
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "voice.realtime_bidirectional.start_requested",
-            fields: [
-                "source": source,
-                "speechModel": selectedModel,
-                "speechVoice": activeRealtimeSpeechVoiceID,
-                "inputPath": activeRealtimeInputPath,
-                "thinkModel": activeRealtimeThinkModel,
-                "bypassesWhisper": true,
-                "historyCount": historyForAPI.count
-            ]
-        )
-
-        realtimeBidirectionalVoiceTask?.cancel()
-        realtimeBidirectionalVoiceTask = Task { [weak self] in
-            do {
-                guard let self else { return }
-                let onUserTranscript: @MainActor @Sendable (String) -> Void = { [weak self] transcript in
-                    guard self?.realtimeBidirectionalVoiceTurnGeneration == turnGeneration else { return }
-                    self?.lastTranscript = transcript
-                    self?.circleSelectLivePartialTranscript = transcript
-                    self?.circleSelectSession.refreshSnapUsingLatestTranscript()
-                }
-                let onAssistantTextChunk: @MainActor @Sendable (String) -> Void = { [weak self] accumulatedText in
-                    guard self?.realtimeBidirectionalVoiceTurnGeneration == turnGeneration else { return }
-                    let trimmed = accumulatedText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmed.isEmpty else { return }
-                    self?.latestVoiceResponseCard = ClickyResponseCard(
-                        source: .voice,
-                        rawText: trimmed,
-                        contextTitle: "Realtime voice input"
-                    )
-                    self?.updateVoiceResponseCaption(trimmed)
-                }
-                let onPlaybackStarted: @MainActor @Sendable () -> Void = { [weak self] in
-                    guard self?.realtimeBidirectionalVoiceTurnGeneration == turnGeneration else { return }
-                    self?.voiceState = .responding
-                    OpenClickyMessageLogStore.shared.append(
-                        lane: "voice",
-                        direction: "internal",
-                        event: "voice.realtime_bidirectional.audio_started",
-                        fields: [
-                            "source": source,
-                            "speechModel": self?.selectedModel ?? "unknown",
-                            "speechVoice": self?.activeRealtimeSpeechVoiceID ?? "unknown",
-                            "startupDurationMs": Self.elapsedMilliseconds(since: startedAt)
-                        ]
-                    )
-                }
-                let selectedVoiceResponseModel = OpenClickyModelCatalog.voiceResponseModel(withID: self.selectedModel)
-                if selectedVoiceResponseModel.provider == .deepgram {
-                    try await self.deepgramVoiceAgentClient.beginBidirectionalVoiceTurn(
-                        systemPrompt: self.currentRealtimeVoiceSystemPrompt(),
-                        conversationHistory: historyForAPI,
-                        onUserTranscript: onUserTranscript,
-                        onAssistantTextChunk: onAssistantTextChunk,
-                        onPlaybackStarted: onPlaybackStarted
-                    )
-                } else {
-                    try await self.openAIRealtimeSpeechClient.beginBidirectionalVoiceTurn(
-                        systemPrompt: self.currentRealtimeVoiceSystemPrompt(),
-                        conversationHistory: historyForAPI,
-                        onUserTranscript: onUserTranscript,
-                        onAssistantTextChunk: onAssistantTextChunk,
-                        onPlaybackStarted: onPlaybackStarted,
-                        onInputPowerLevel: { [weak self] powerLevel in
-                            self?.currentAudioPowerLevel = CGFloat(powerLevel)
-                        }
-                    )
-                }
-                await MainActor.run {
-                    guard self.realtimeBidirectionalVoiceTurnGeneration == turnGeneration,
-                          self.isRealtimeBidirectionalVoiceCaptureActive,
-                          !Task.isCancelled else {
-                        return
-                    }
-                    self.isRealtimeBidirectionalVoiceInputReady = true
-                    self.voiceState = .listening
-                    let pendingFinishSource = self.pendingRealtimeBidirectionalFinishSource
-                    self.pendingRealtimeBidirectionalFinishSource = nil
-                    OpenClickyMessageLogStore.shared.append(
-                        lane: "voice",
-                        direction: "internal",
-                        event: "voice.realtime_bidirectional.input_ready",
-                        fields: [
-                            "source": source,
-                            "pendingFinish": pendingFinishSource != nil,
-                            "startupDurationMs": Self.elapsedMilliseconds(since: startedAt)
-                        ]
-                    )
-                    if let pendingFinishSource {
-                        OpenClickyMessageLogStore.shared.append(
-                            lane: "voice",
-                            direction: "internal",
-                            event: "voice.realtime_bidirectional.pending_finish_committed",
-                            fields: [
-                                "source": pendingFinishSource,
-                                "startupDurationMs": Self.elapsedMilliseconds(since: startedAt),
-                                "captureDurationMs": Self.elapsedMilliseconds(since: self.realtimeBidirectionalVoiceCaptureStartedAt)
-                            ]
-                        )
-                        _ = self.finishBidirectionalRealtimeVoiceCaptureIfNeeded(source: pendingFinishSource)
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self?.handleBidirectionalRealtimeVoiceFailure(error, source: source, stage: "start")
-                }
-            }
-        }
-    }
-
     @discardableResult
-    func finishBidirectionalRealtimeVoiceCaptureIfNeeded(source: String) -> Bool {
-        guard isRealtimeBidirectionalVoiceCaptureActive else { return false }
-        if !isRealtimeBidirectionalVoiceInputReady {
-            pendingRealtimeBidirectionalFinishSource = source
-            OpenClickyMessageLogStore.shared.append(
-                lane: "voice",
-                direction: "internal",
-                event: "voice.realtime_bidirectional.finish_deferred_until_ready",
-                fields: [
-                    "source": source,
-                    "speechModel": selectedModel,
-                    "speechVoice": activeRealtimeSpeechVoiceID,
-                    "inputPath": activeRealtimeInputPath,
-                    "captureDurationMs": Self.elapsedMilliseconds(since: realtimeBidirectionalVoiceCaptureStartedAt)
-                ]
-            )
-            return true
-        }
-
-        isRealtimeBidirectionalVoiceCaptureActive = false
-        isRealtimeBidirectionalVoiceInputReady = false
-        pendingRealtimeBidirectionalFinishSource = nil
-        voiceState = .processing
-        wakeWordAudioDucker.restore(reason: "realtime_capture_finished")
-
-        let finishedAt = Date()
-        let captureStartedAt = realtimeBidirectionalVoiceCaptureStartedAt
-        let turnGeneration = realtimeBidirectionalVoiceTurnGeneration
-        realtimeBidirectionalVoiceTask = Task { [weak self] in
-            do {
-                guard let self else { return }
-                let routeBeforeAssistant: @MainActor @Sendable (String) -> Bool = { [weak self] transcript in
-                    guard let self else { return false }
-                    return self.routeCompletedRealtimeVoiceTranscriptIfNeeded(transcript)
-                }
-                let routeRealtimeToolCall: @MainActor @Sendable (String, String) -> Bool = { [weak self] toolName, transcript in
-                    guard let self else { return false }
-                    OpenClickyMessageLogStore.shared.append(
-                        lane: "voice",
-                        direction: "internal",
-                        event: "voice.realtime_bidirectional.tool_route_requested",
-                        fields: [
-                            "toolName": toolName,
-                            "transcript": transcript,
-                            "speechModel": self.selectedModel,
-                            "computerUseBackend": self.selectedComputerUseBackend.rawValue,
-                            "computerUseModel": self.selectedComputerUseModel,
-                            "backgroundAgentModel": self.codexAgentSession.model
-                        ]
-                    )
-                    // Honor the realtime model's own IT-vs-agent decision. The
-                    // model already classified this turn by picking a tool, so
-                    // try the deterministic cascade first; but when the model
-                    // explicitly chose background Agent Mode and no heuristic
-                    // route claims the turn, force the agent dispatch instead of
-                    // dropping the decision and letting the model just talk
-                    // (previously the tool name was logged here and discarded).
-                    // Tool-routed realtime turns can already have produced a
-                    // spoken assistant acknowledgement before the app sees the
-                    // function call. If the normal deterministic cascade turns
-                    // that same transcript into an agent start, keep the
-                    // app-level handoff silent so OpenClicky does not say the
-                    // background acknowledgement twice.
-                    self.suppressNextVoiceAgentStartAcknowledgement = true
-                    if self.routeCompletedRealtimeVoiceTranscriptIfNeeded(transcript) {
-                        if self.suppressNextVoiceAgentStartAcknowledgement {
-                            self.suppressNextVoiceAgentStartAcknowledgement = false
-                        }
-                        return true
-                    }
-                    self.suppressNextVoiceAgentStartAcknowledgement = false
-                    if toolName == "openclicky_use_computer" {
-                        let instruction = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !instruction.isEmpty else { return false }
-                        OpenClickyMessageLogStore.shared.append(
-                            lane: "computer-use",
-                            direction: "internal",
-                            event: "voice.realtime_bidirectional.computer_tool_route_unresolved",
-                            fields: [
-                                "transcript": instruction,
-                                "toolName": toolName,
-                                "executor": self.selectedComputerUseBackend.executorID,
-                                "route": "\(self.selectedComputerUseBackend.executorID).unresolved",
-                                "requestID": self.activeRequestTiming?.requestID ?? "none"
-                            ]
-                        )
-                        self.speakShortSystemResponse("what should I do on the computer?")
-                        self.recordRealtimeVoiceRouteFingerprint(Self.realtimeVoiceRouteFingerprint(instruction))
-                        return true
-                    }
-                    if toolName == "openclicky_use_screen_context" {
-                        let instruction = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !instruction.isEmpty else { return false }
-                        OpenClickyMessageLogStore.shared.append(
-                            lane: "voice",
-                            direction: "internal",
-                            event: "voice.realtime_bidirectional.visual_tool_route_recovered",
-                            fields: [
-                                "transcript": instruction,
-                                "toolName": toolName,
-                                "executor": "voice_response",
-                                "route": "voice.response",
-                                "requestID": self.activeRequestTiming?.requestID ?? "none"
-                            ]
-                        )
-                        self.sendTranscriptToClaudeWithScreenshot(transcript: instruction)
-                        self.recordRealtimeVoiceRouteFingerprint(Self.realtimeVoiceRouteFingerprint(instruction))
-                        return true
-                    }
-                    guard toolName == "openclicky_start_background_agent" else {
-                        return false
-                    }
-                    let instruction = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !instruction.isEmpty else { return false }
-                    OpenClickyMessageLogStore.shared.append(
-                        lane: "agent",
-                        direction: "incoming",
-                        event: "openclicky.agent_task.realtime_tool_route",
-                        fields: [
-                            "transcript": transcript,
-                            "instruction": instruction,
-                            "toolName": toolName,
-                            "executor": "agent_mode",
-                            "route": "agent.realtime_tool",
-                            "requestID": self.activeRequestTiming?.requestID ?? "none"
-                        ]
-                    )
-                    self.startVoiceAgentTaskPlan(
-                        instruction: instruction,
-                        acknowledgement: "i’ll take care of that in the background.",
-                        speakAcknowledgement: false,
-                        voiceContextUserTranscript: transcript
-                    )
-                    self.recordRealtimeVoiceRouteFingerprint(Self.realtimeVoiceRouteFingerprint(instruction))
-                    return true
-                }
-                let selectedVoiceResponseModel = OpenClickyModelCatalog.voiceResponseModel(withID: self.selectedModel)
-                let result: BidirectionalRealtimeVoiceResult
-                if selectedVoiceResponseModel.provider == .deepgram {
-                    let deepgramResult = try await self.deepgramVoiceAgentClient.finishBidirectionalVoiceTurn(
-                        routeUserTranscriptBeforeAssistantResponse: routeBeforeAssistant
-                    )
-                    result = BidirectionalRealtimeVoiceResult(
-                        userTranscript: deepgramResult.userTranscript,
-                        assistantTranscript: deepgramResult.assistantTranscript,
-                        didCreateAssistantResponse: deepgramResult.didCreateAssistantResponse,
-                        wasRoutedByClient: deepgramResult.wasRoutedByClient
-                    )
-                } else {
-                    let openAIResult = try await self.openAIRealtimeSpeechClient.finishBidirectionalVoiceTurn(
-                        routeUserTranscriptBeforeAssistantResponse: routeBeforeAssistant,
-                        routeRealtimeToolCallBeforeAssistantResponse: routeRealtimeToolCall
-                    )
-                    result = BidirectionalRealtimeVoiceResult(
-                        userTranscript: openAIResult.userTranscript,
-                        assistantTranscript: openAIResult.assistantTranscript,
-                        didCreateAssistantResponse: openAIResult.didCreateAssistantResponse,
-                        wasRoutedByClient: openAIResult.wasRoutedByClient
-                    )
-                }
-                let assistantText = result.assistantTranscript.isEmpty
-                    ? (result.didCreateAssistantResponse ? "Done." : "Routed to OpenClicky.")
-                    : result.assistantTranscript
-                let userTranscript = result.userTranscript.isEmpty ? "Realtime voice input" : result.userTranscript
-                var wasRoutedByApp = result.wasRoutedByClient
-                var didApplyRealtimeResult = false
-
-                await MainActor.run {
-                    guard self.realtimeBidirectionalVoiceTurnGeneration == turnGeneration,
-                          !Task.isCancelled else {
-                        let canRecoverStaleProcessingState = self.voiceState == .processing
-                            && !self.isRealtimeBidirectionalVoiceCaptureActive
-                            && !self.voiceTTSClient.isPlaying
-                            && !self.openAIRealtimeSpeechClient.isPlaying
-                            && !self.deepgramVoiceAgentClient.isPlaying
-                        if canRecoverStaleProcessingState {
-                            self.voiceState = .idle
-                            self.currentAudioPowerLevel = 0
-                            self.clearVoiceResponseCaption()
-                        }
-                        OpenClickyMessageLogStore.shared.append(
-                            lane: "voice",
-                            direction: "internal",
-                            event: "voice.realtime_bidirectional.stale_finish_ignored",
-                            fields: [
-                                "source": source,
-                                "speechModel": self.selectedModel,
-                                "speechVoice": self.activeRealtimeSpeechVoiceID,
-                                "inputPath": self.activeRealtimeInputPath,
-                                "recoveredProcessingState": canRecoverStaleProcessingState,
-                                "captureDurationMs": Self.elapsedMilliseconds(since: captureStartedAt),
-                                "responseDurationMs": Self.elapsedMilliseconds(since: finishedAt)
-                            ]
-                        )
-                        return
-                    }
-                    didApplyRealtimeResult = true
-                    self.lastTranscript = userTranscript
-                    let routedByApp = wasRoutedByApp || self.routeCompletedRealtimeVoiceTranscriptIfNeeded(userTranscript)
-                    wasRoutedByApp = routedByApp
-                    if !routedByApp,
-                       self.autoEscalateVoiceResponseToAgentIfNeeded(
-                        responseText: assistantText,
-                        transcript: userTranscript,
-                        source: "realtime_bidirectional"
-                       ) {
-                        self.recordRealtimeVoiceRouteFingerprint(Self.realtimeVoiceRouteFingerprint(userTranscript))
-                        self.releaseRealtimeVoiceConversationMode(reason: "routed_by_app")
-                        self.lastVoiceInteractionCompletedAt = Date()
-                        self.scheduleStatusSync()
-                        return
-                    }
-                    if !routedByApp {
-                        self.rememberVoiceExchange(
-                            userTranscript: userTranscript,
-                            assistantResponse: assistantText,
-                            reason: "realtime_bidirectional"
-                        )
-                        if Self.responseOffersAgentSpawn(assistantText) {
-                            self.pendingAgentOfferInstruction = userTranscript
-                            self.pendingAgentOfferAt = Date()
-                        } else {
-                            self.pendingAgentOfferInstruction = nil
-                            self.pendingAgentOfferAt = nil
-                        }
-                        self.latestVoiceResponseCard = ClickyResponseCard(
-                            source: .voice,
-                            rawText: assistantText,
-                            contextTitle: userTranscript
-                        )
-                        self.updateVoiceResponseCaption(assistantText)
-                        self.voiceState = .idle
-                    }
-                    if routedByApp {
-                        // App-routed realtime turns (for example “get an agent on it”)
-                        // intentionally skip assistant playback, so no playback
-                        // callback will reset the notch/cursor out of the active
-                        // voice phase. Explicitly release the realtime capture
-                        // UI back to idle once the route has been handed off.
-                        self.releaseRealtimeVoiceConversationMode(reason: "routed_by_app")
-                    }
-                    self.lastVoiceInteractionCompletedAt = Date()
-                    self.scheduleStatusSync()
-                    OpenClickyMessageLogStore.shared.append(
-                        lane: "voice",
-                        direction: "internal",
-                        event: "voice.realtime_bidirectional.finished",
-                        fields: [
-                            "source": source,
-                            "speechModel": self.selectedModel,
-                            "speechVoice": self.activeRealtimeSpeechVoiceID,
-                            "inputPath": self.activeRealtimeInputPath,
-                            "bypassesWhisper": true,
-                            "routedByApp": routedByApp,
-                            "appRouteChecked": true,
-                            "createdRealtimeAssistantResponse": result.didCreateAssistantResponse,
-                            "userTranscriptLength": result.userTranscript.count,
-                            "assistantTranscriptLength": result.assistantTranscript.count,
-                            "captureDurationMs": Self.elapsedMilliseconds(since: captureStartedAt),
-                            "responseDurationMs": Self.elapsedMilliseconds(since: finishedAt)
-                        ]
-                    )
-                }
-
-                guard didApplyRealtimeResult else { return }
-
-                if result.didCreateAssistantResponse && !result.userTranscript.isEmpty && !wasRoutedByApp {
-                    do {
-                        try self.codexHomeManager.appendPersistentMemoryEvent(
-                            userRequest: userTranscript,
-                            agentResponse: assistantText
-                        )
-                    } catch {
-                        print("⚠️ OpenClicky memory update failed: \(error)")
-                    }
-                    ClickyAnalytics.trackAIResponseReceived(response: assistantText)
-                }
-            } catch {
-                await MainActor.run {
-                    self?.handleBidirectionalRealtimeVoiceFailure(
-                        error,
-                        source: source,
-                        stage: "finish",
-                        captureStartedAt: captureStartedAt,
-                        startedAsInterrupt: self?.realtimeBidirectionalVoiceStartedAsInterrupt ?? false
-                    )
-                }
-            }
-        }
-        realtimeBidirectionalVoiceCaptureStartedAt = nil
-        return true
-    }
-
-    private func releaseRealtimeVoiceConversationMode(reason: String) {
-        isRealtimeBidirectionalVoiceCaptureActive = false
-        isRealtimeBidirectionalVoiceInputReady = false
-        pendingRealtimeBidirectionalFinishSource = nil
-        realtimeBidirectionalVoiceCaptureStartedAt = nil
-        realtimeBidirectionalVoiceStartedAsInterrupt = false
-        clearVoiceResponseCaptionAndInteractiveBubble()
-        currentAudioPowerLevel = 0
-        wakeWordAudioDucker.restore(reason: "realtime_released_\(reason)")
-        voiceState = .idle
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "voice.realtime_bidirectional.released",
-            fields: [
-                "reason": reason,
-                "speechModel": selectedModel,
-                "speechVoice": activeRealtimeSpeechVoiceID,
-                "inputPath": activeRealtimeInputPath
-            ]
-        )
-    }
-
 
     /// Fires from the processing watchdog when voiceState has been stuck
     /// at .processing for longer than processingWatchdogTimeout seconds.
     /// Resets UI state only — does NOT cancel in-flight tasks so a late
     /// response can still arrive and transition to .responding normally.
     private func recoverFromStuckProcessingStateIfNeeded() {
-        guard voiceState == .processing,
-              !isRealtimeBidirectionalVoiceCaptureActive,
-              !voiceTTSClient.isPlaying,
-              !openAIRealtimeSpeechClient.isPlaying,
-              !deepgramVoiceAgentClient.isPlaying else { return }
+        guard voiceState == .processing else { return }
         voiceState = .idle
         currentAudioPowerLevel = 0
         clearVoiceResponseCaption()
@@ -5189,181 +3698,7 @@ final class CompanionManager: ObservableObject {
             event: "voice.state.processing_watchdog_recovered",
             fields: [
                 "timeoutSeconds": Int(Self.processingWatchdogTimeout),
-                "speechModel": selectedModel,
-                "inputPath": activeRealtimeInputPath
-            ]
-        )
-    }
-
-    static func shouldSilenceQuickRealtimeShortcutFailure(
-        _ error: Error,
-        source: String,
-        stage: String,
-        captureStartedAt: Date?,
-        startedAsInterrupt: Bool
-    ) -> Bool {
-        guard source == "keyboardShortcut",
-              stage == "finish",
-              startedAsInterrupt,
-              let captureStartedAt else {
-            return false
-        }
-        let errorMessage = error.localizedDescription.lowercased()
-        guard errorMessage.contains("could not detect usable microphone audio") else {
-            return false
-        }
-        return Date().timeIntervalSince(captureStartedAt) <= quickShortcutInterruptSilenceThreshold
-    }
-
-    private func routeCompletedRealtimeVoiceTranscriptIfNeeded(_ transcript: String) -> Bool {
-        let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedTranscript.isEmpty,
-              trimmedTranscript != "Realtime voice input" else {
-            return false
-        }
-
-        // Suppress a duplicate routing event (final-transcript callback and
-        // tool-route callback can both fire for the same utterance ~1s apart).
-        let routeFingerprint = Self.realtimeVoiceRouteFingerprint(trimmedTranscript)
-        if let last = lastRealtimeVoiceRouteFingerprint,
-           let lastAt = lastRealtimeVoiceRouteAt,
-           Date().timeIntervalSince(lastAt) <= Self.realtimeVoiceRouteDuplicateTTL,
-           Self.isDuplicateRealtimeVoiceRouteFingerprint(routeFingerprint, last) {
-            OpenClickyMessageLogStore.shared.append(
-                lane: "voice",
-                direction: "internal",
-                event: "voice.response.duplicate_suppressed",
-                fields: [
-                    "transcript": trimmedTranscript,
-                    "ageMs": Int(Date().timeIntervalSince(lastAt) * 1000),
-                    "inputPath": activeRealtimeInputPath
-                ]
-            )
-            return true
-        }
-
-        rememberMainConversationUserPrompt(trimmedTranscript, source: "realtime_final_transcript")
-
-        let requestTiming = beginRequestTiming(source: "realtime_voice_final_transcript", text: trimmedTranscript)
-        activeRequestTiming = requestTiming
-        defer {
-            activeRequestTiming = nil
-            clearDeferredLiveAgentRoutePartial()
-        }
-
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "incoming",
-            event: "voice.transcript",
-            fields: [
-                "text": trimmedTranscript,
-                "inputPath": activeRealtimeInputPath,
-                "voiceInferenceModel": selectedModel,
-                "computerUseBackend": selectedComputerUseBackend.rawValue,
-                "computerUseModel": selectedComputerUseModel,
-                "backgroundAgentModel": codexAgentSession.model,
-                "requestID": requestTiming.requestID
-            ]
-        )
-
-        if submitHomeChatVoiceTranscriptIfNeeded(trimmedTranscript, source: "realtime_home_chat") {
-            recordRealtimeVoiceRouteFingerprint(routeFingerprint)
-            return true
-        }
-
-        if routeFinalVoiceTranscriptActionIfNeeded(
-            trimmedTranscript,
-            source: "realtime_voice",
-            selectionSource: "realtime_voice_final_transcript",
-            directComputerUseSource: "realtime_final_transcript",
-            includeQuickLocalResponses: true,
-            hybridAgentStartCountsAsHandled: true
-        ) {
-            recordRealtimeVoiceRouteFingerprint(routeFingerprint)
-            return true
-        }
-
-        if Self.shouldAttachScreenContext(to: trimmedTranscript) {
-            OpenClickyMessageLogStore.shared.append(
-                lane: "voice",
-                direction: "internal",
-                event: "voice.realtime_bidirectional.visual_route_recovered",
-                fields: [
-                    "transcript": trimmedTranscript,
-                    "executor": "voice_response",
-                    "route": "voice.response",
-                    "requestID": requestTiming.requestID
-                ]
-            )
-            sendTranscriptToClaudeWithScreenshot(transcript: trimmedTranscript)
-            recordRealtimeVoiceRouteFingerprint(routeFingerprint)
-            return true
-        }
-
-        return false
-    }
-
-    private func recordRealtimeVoiceRouteFingerprint(_ fingerprint: String) {
-        lastRealtimeVoiceRouteFingerprint = fingerprint
-        lastRealtimeVoiceRouteAt = Date()
-    }
-
-    private func handleBidirectionalRealtimeVoiceFailure(
-        _ error: Error,
-        source: String,
-        stage: String,
-        captureStartedAt: Date? = nil,
-        startedAsInterrupt: Bool = false
-    ) {
-        openAIRealtimeSpeechClient.cancelBidirectionalVoiceTurn()
-        deepgramVoiceAgentClient.cancelBidirectionalVoiceTurn()
-        let shouldFailSilently = Self.shouldSilenceQuickRealtimeShortcutFailure(
-            error,
-            source: source,
-            stage: stage,
-            captureStartedAt: captureStartedAt,
-            startedAsInterrupt: startedAsInterrupt
-        )
-        releaseRealtimeVoiceConversationMode(reason: shouldFailSilently ? "quick_interrupt_\(stage)" : "failure_\(stage)")
-        let errorMessage = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !shouldFailSilently else {
-            OpenClickyMessageLogStore.shared.append(
-                lane: "voice",
-                direction: "internal",
-                event: "voice.realtime_bidirectional.quick_interrupt_silenced",
-                fields: [
-                    "source": source,
-                    "stage": stage,
-                    "speechModel": selectedModel,
-                    "speechVoice": activeRealtimeSpeechVoiceID,
-                    "inputPath": activeRealtimeInputPath,
-                    "startedAsInterrupt": startedAsInterrupt,
-                    "captureDurationMs": Self.elapsedMilliseconds(since: captureStartedAt),
-                    "error": error.localizedDescription
-                ]
-            )
-            return
-        }
-        let userFacingMessage = errorMessage.isEmpty
-            ? "OpenClicky could not capture microphone audio. Check the microphone input and try again."
-            : errorMessage
-        latestVoiceResponseCard = ClickyResponseCard(
-            source: .voice,
-            rawText: userFacingMessage,
-            contextTitle: "Voice input fault"
-        )
-        updateVoiceResponseCaption(userFacingMessage, force: true)
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "voice.realtime_bidirectional.failed",
-            fields: [
-                "source": source,
-                "stage": stage,
-                "speechModel": selectedModel,
-                "speechVoice": activeRealtimeSpeechVoiceID,
-                "inputPath": activeRealtimeInputPath,
-                "error": error.localizedDescription
+                "model": selectedModel
             ]
         )
     }
@@ -5389,15 +3724,7 @@ final class CompanionManager: ObservableObject {
         )
         ClickyAnalytics.trackUserMessageSent(transcript: finalTranscript)
 
-        // The final transcript ends the live-partial window for every
-        // route, including local/direct routes that return before the
-        // normal voice-response path. Cancel the dwell timer here so it
-        // cannot fire a stale speculative model request after a quick
-        // local response has already completed.
-        speculativeStabilityDwellTask?.cancel()
-        speculativeStabilityDwellTask = nil
-        lastObservedPartial = nil
-        lastObservedPartialAt = nil
+        // The final transcript ends the live-partial window for every route.
 
         if submitHomeChatVoiceTranscriptIfNeeded(finalTranscript, source: "voice_home_chat") {
             return
@@ -5416,15 +3743,6 @@ final class CompanionManager: ObservableObject {
         // by instant text and Realtime voice, so later "on it" / "do that"
         // agent handoffs can resolve to the actual previous message.
         rememberMainConversationUserPrompt(finalTranscript, source: "voice_final_transcript")
-
-        // Speculative pre-fire commit path. If the partial we fired
-        // against matches the final, hand the in-flight Claude task
-        // straight to the TTS pipeline — saves the entire model TTFT
-        // window. Otherwise fall through to the normal capture+fire.
-        if let committed = consumeSpeculativeFireIfMatches(finalTranscript) {
-            commitSpeculativeFire(committed, transcript: finalTranscript)
-            return
-        }
 
         sendTranscriptToClaudeWithScreenshot(transcript: finalTranscript)
     }
@@ -5495,10 +3813,6 @@ final class CompanionManager: ObservableObject {
 
     private func handleLiveComputerUseTranscript(_ partialTranscript: String) {
         let trimmedTranscript = partialTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Independent of CUA: track this partial for the speculative
-        // pre-fire path. Fires its own background Task when stable.
-        observePartialForSpeculativePreFire(trimmedTranscript)
 
         let isShortKnownAppRequest = Self.bareLocalAppOpenRequest(from: trimmedTranscript) != nil
         guard trimmedTranscript.count >= 8 || isShortKnownAppRequest else { return }
@@ -5861,7 +4175,7 @@ final class CompanionManager: ObservableObject {
                         "path": folderRequest.url.path
                     ]
                 )
-                speakShortSystemResponse("opening \(folderRequest.displayName).")
+                showShortSystemResponse("opening \(folderRequest.displayName).")
                 markRequestCompleted(
                     route: "native_cua.open_folder.already_handled_live",
                     executionStartedAt: executionStartedAt,
@@ -5935,7 +4249,7 @@ final class CompanionManager: ObservableObject {
                 rawText: response,
                 contextTitle: compositeRequest.instruction
             )
-            speakShortSystemResponse(response)
+            showShortSystemResponse(response)
             markRequestCompleted(
                 route: "\(backend.executorID).composite_app_action.unsupported",
                 executionStartedAt: executionStartedAt,
@@ -6020,7 +4334,7 @@ final class CompanionManager: ObservableObject {
                         "appName": appOpenRequest.appName
                     ]
                 )
-                speakShortSystemResponse("opening \(appOpenRequest.appName).")
+                showShortSystemResponse("opening \(appOpenRequest.appName).")
                 markRequestCompleted(
                     route: "native_cua.open_app.already_handled_live",
                     executionStartedAt: executionStartedAt,
@@ -6172,7 +4486,7 @@ final class CompanionManager: ObservableObject {
                         "modifiers": keyPressRequest.modifiers.joined(separator: ",")
                     ]
                 )
-                speakShortSystemResponse("pressed \(modifierText)\(keyPressRequest.key).")
+                showShortSystemResponse("pressed \(modifierText)\(keyPressRequest.key).")
                 markRequestCompleted(
                     route: "\(backend.executorID).press_key.already_handled_live",
                     executionStartedAt: executionStartedAt,
@@ -6255,7 +4569,7 @@ final class CompanionManager: ObservableObject {
             ]
         )
         if shouldSpeak {
-            speakShortSystemResponse("opening \(request.displayName).")
+            showShortSystemResponse("opening \(request.displayName).")
         }
         markRequestCompleted(
             route: "native_cua.open_url",
@@ -6346,7 +4660,7 @@ final class CompanionManager: ObservableObject {
 
         guard let spotifyURL = Self.spotifySearchURL(for: query),
               NSWorkspace.shared.open(spotifyURL) else {
-            speakShortSystemResponse("i couldn't open Spotify search for \(query).")
+            showShortSystemResponse("i couldn't open Spotify search for \(query).")
             markRequestCompleted(
                 route: route,
                 executionStartedAt: executionStartedAt,
@@ -6368,7 +4682,7 @@ final class CompanionManager: ObservableObject {
             rawText: "searching Spotify for \(query).",
             contextTitle: request.instruction
         )
-        speakShortSystemResponse("searching Spotify for \(query).")
+        showShortSystemResponse("searching Spotify for \(query).")
 
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -6413,7 +4727,7 @@ final class CompanionManager: ObservableObject {
                                 rawText: "playing \(query) on Spotify.",
                                 contextTitle: request.instruction
                             )
-                            speakShortSystemResponse("playing \(query) on Spotify.")
+                            showShortSystemResponse("playing \(query) on Spotify.")
                             OpenClickyMessageLogStore.shared.append(
                                 lane: "computer-use",
                                 direction: "outgoing",
@@ -6448,7 +4762,7 @@ final class CompanionManager: ObservableObject {
                     let errorText = verification.terminationStatus == 0
                         ? "Spotify stayed \(playerState.isEmpty ? "unknown" : playerState) after search selection."
                         : (verificationError.isEmpty ? "Spotify playback verification failed." : verificationError)
-                    speakShortSystemResponse("i opened Spotify search, but it didn't start playing.")
+                    showShortSystemResponse("i opened Spotify search, but it didn't start playing.")
                     OpenClickyMessageLogStore.shared.append(
                         lane: "computer-use",
                         direction: "error",
@@ -6576,7 +4890,7 @@ final class CompanionManager: ObservableObject {
                 rawText: acknowledgement,
                 contextTitle: instruction
             )
-            speakShortSystemResponse(acknowledgement)
+            showShortSystemResponse(acknowledgement)
             OpenClickyMessageLogStore.shared.append(
                 lane: "computer-use",
                 direction: "outgoing",
@@ -6605,7 +4919,7 @@ final class CompanionManager: ObservableObject {
             )
         } else {
             let errorText = "default output volume is unavailable or not settable for the current audio device"
-            speakShortSystemResponse("System volume hit a blocker: \(errorText).")
+            showShortSystemResponse("System volume hit a blocker: \(errorText).")
             OpenClickyMessageLogStore.shared.append(
                 lane: "computer-use",
                 direction: "error",
@@ -6734,7 +5048,7 @@ final class CompanionManager: ObservableObject {
                     rawText: acknowledgement,
                     contextTitle: request.instruction
                 )
-                speakShortSystemResponse(acknowledgement)
+                showShortSystemResponse(acknowledgement)
                 OpenClickyMessageLogStore.shared.append(
                     lane: "computer-use",
                     direction: "outgoing",
@@ -6764,7 +5078,7 @@ final class CompanionManager: ObservableObject {
                 )
             } else {
                 let errorText = errorOutput.isEmpty ? "Spotify automation failed." : errorOutput
-                speakShortSystemResponse("Spotify hit a blocker: \(errorText)")
+                showShortSystemResponse("Spotify hit a blocker: \(errorText)")
                 OpenClickyMessageLogStore.shared.append(
                     lane: "computer-use",
                     direction: "error",
@@ -6826,7 +5140,7 @@ final class CompanionManager: ObservableObject {
             instruction: "Open \(request.appName)."
         )
         guard openRequestedApplication(appRequest, shouldSpeak: false, logTiming: false) else {
-            speakShortSystemResponse("i couldn't open \(request.appName) for that search.")
+            showShortSystemResponse("i couldn't open \(request.appName) for that search.")
             markRequestCompleted(
                 route: route,
                 executionStartedAt: executionStartedAt,
@@ -6848,7 +5162,7 @@ final class CompanionManager: ObservableObject {
             rawText: "searching \(request.appName) for \(request.query).",
             contextTitle: request.instruction
         )
-        speakShortSystemResponse("searching \(request.appName) for \(request.query).")
+        showShortSystemResponse("searching \(request.appName) for \(request.query).")
 
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 650_000_000)
@@ -6949,7 +5263,7 @@ final class CompanionManager: ObservableObject {
             instruction: "Open \(appName)."
         )
         guard openRequestedApplication(appRequest, shouldSpeak: false, logTiming: false) else {
-            speakShortSystemResponse("i couldn't open \(appName) for that key press.")
+            showShortSystemResponse("i couldn't open \(appName) for that key press.")
             markRequestCompleted(
                 route: route,
                 executionStartedAt: executionStartedAt,
@@ -6982,7 +5296,7 @@ final class CompanionManager: ObservableObject {
                     rawText: acknowledgement,
                     contextTitle: instruction
                 )
-                speakShortSystemResponse(acknowledgement)
+                showShortSystemResponse(acknowledgement)
                 OpenClickyMessageLogStore.shared.append(
                     lane: "computer-use",
                     direction: "outgoing",
@@ -7012,7 +5326,7 @@ final class CompanionManager: ObservableObject {
                     ]
                 )
             } catch {
-                speakShortSystemResponse("\(appName) key press hit a blocker: \(error.localizedDescription)")
+                showShortSystemResponse("\(appName) key press hit a blocker: \(error.localizedDescription)")
                 markRequestCompleted(
                     route: route,
                     executionStartedAt: executionStartedAt,
@@ -7153,7 +5467,7 @@ final class CompanionManager: ObservableObject {
                 ]
             )
             if shouldSpeak {
-                speakShortSystemResponse("opening \(request.appName).")
+                showShortSystemResponse("opening \(request.appName).")
             }
             if logTiming {
                 markRequestCompleted(
@@ -7184,7 +5498,7 @@ final class CompanionManager: ObservableObject {
         )
 
         if shouldSpeak {
-            speakShortSystemResponse("i couldn't open \(request.appName) through native CUA.")
+            showShortSystemResponse("i couldn't open \(request.appName) through native CUA.")
         }
         if logTiming {
             markRequestCompleted(
@@ -7238,7 +5552,7 @@ final class CompanionManager: ObservableObject {
             ]
         )
         if shouldSpeak {
-            speakShortSystemResponse("opening \(request.displayName).")
+            showShortSystemResponse("opening \(request.displayName).")
         }
         markRequestCompleted(
             route: "native_cua.open_folder",
@@ -7315,7 +5629,7 @@ final class CompanionManager: ObservableObject {
                             "instruction": instruction
                         ]
                     )
-                    self.speakShortSystemResponse("added \(title) to Reminders.")
+                    self.showShortSystemResponse("added \(title) to Reminders.")
                     self.markRequestCompleted(
                         route: "native_cua.reminder_add",
                         executionStartedAt: executionStartedAt,
@@ -7347,7 +5661,7 @@ final class CompanionManager: ObservableObject {
                             "error": result.errorOutput.isEmpty ? result.output : result.errorOutput
                         ]
                     )
-                    self.speakShortSystemResponse(message)
+                    self.showShortSystemResponse(message)
                     self.markRequestCompleted(
                         route: "native_cua.reminder_add",
                         executionStartedAt: executionStartedAt,
@@ -7420,7 +5734,7 @@ final class CompanionManager: ObservableObject {
                             "instruction": instruction
                         ]
                     )
-                    self.speakShortSystemResponse(response)
+                    self.showShortSystemResponse(response)
                     self.markRequestCompleted(
                         route: "native_cua.reminder_count",
                         executionStartedAt: executionStartedAt,
@@ -7451,7 +5765,7 @@ final class CompanionManager: ObservableObject {
                             "error": result.errorOutput.isEmpty ? result.output : result.errorOutput
                         ]
                     )
-                    self.speakShortSystemResponse(message)
+                    self.showShortSystemResponse(message)
                     self.markRequestCompleted(
                         route: "native_cua.reminder_count",
                         executionStartedAt: executionStartedAt,
@@ -7517,7 +5831,7 @@ final class CompanionManager: ObservableObject {
     @discardableResult
     private func ensureNativeComputerUseEnabledOrRefuse(spokenAction: String) -> Bool {
         if nativeComputerUseController.isEnabled { return true }
-        speakShortSystemResponse("computer use is turned off. turn it on in settings if you want me to \(spokenAction).")
+        showShortSystemResponse("computer use is turned off. turn it on in settings if you want me to \(spokenAction).")
         OpenClickyMessageLogStore.shared.append(
             lane: "computer-use",
             direction: "error",
@@ -7575,7 +5889,7 @@ final class CompanionManager: ObservableObject {
                 )
                 let parseResult = Self.parsePointingCoordinates(from: response)
                 guard let pointCoordinate = parseResult.coordinate else {
-                    speakShortSystemResponse("i couldn't find that to click.")
+                    showShortSystemResponse("i couldn't find that to click.")
                     markRequestCompleted(
                         route: "background_computer_use.click",
                         executionStartedAt: executionStartedAt,
@@ -7598,7 +5912,7 @@ final class CompanionManager: ObservableObject {
                     stateToken: capture.stateToken
                 )
                 let spokenLabel = parseResult.elementLabel ?? request.targetPhrase
-                speakShortSystemResponse(spokenLabel.map { "clicked \($0)." } ?? "clicked that.")
+                showShortSystemResponse(spokenLabel.map { "clicked \($0)." } ?? "clicked that.")
                 markRequestCompleted(
                     route: "background_computer_use.click",
                     executionStartedAt: executionStartedAt,
@@ -7614,7 +5928,7 @@ final class CompanionManager: ObservableObject {
                     ]
                 )
             } catch {
-                speakShortSystemResponse("i couldn't click that through background computer use.")
+                showShortSystemResponse("i couldn't click that through background computer use.")
                 markRequestCompleted(
                     route: "background_computer_use.click",
                     executionStartedAt: executionStartedAt,
@@ -7647,7 +5961,7 @@ final class CompanionManager: ObservableObject {
                 "targetPhrase": request.targetPhrase ?? "",
                 "prefersLastPointedElement": request.prefersLastPointedElement,
                 "pointingResolver": pointingResolver.rawValue,
-                "pointingModel": pointingResolver == .openAIRealtime ? selectedModel : selectedComputerUseModel
+                "pointingModel": selectedComputerUseModel
             ]
         )
 
@@ -7696,7 +6010,7 @@ final class CompanionManager: ObservableObject {
                 )
                 let parseResult = Self.parsePointingCoordinates(from: response)
                 guard let pointCoordinate = parseResult.coordinate else {
-                    speakShortSystemResponse("i couldn't find that to click.")
+                    showShortSystemResponse("i couldn't find that to click.")
                     markRequestCompleted(
                         route: "native_cua.click",
                         executionStartedAt: executionStartedAt,
@@ -7735,7 +6049,7 @@ final class CompanionManager: ObservableObject {
                         "error": error.localizedDescription
                     ]
                 )
-                speakShortSystemResponse("clicking hit a blocker: \(error.localizedDescription)")
+                showShortSystemResponse("clicking hit a blocker: \(error.localizedDescription)")
                 markRequestCompleted(
                     route: "native_cua.click",
                     executionStartedAt: executionStartedAt,
@@ -7791,7 +6105,7 @@ final class CompanionManager: ObservableObject {
                     "y": Int(point.y)
                 ]
             )
-            speakShortSystemResponse("clicked \(label ?? request.targetPhrase ?? "that").")
+            showShortSystemResponse("clicked \(label ?? request.targetPhrase ?? "that").")
             markRequestCompleted(
                 route: "native_cua.click",
                 executionStartedAt: executionStartedAt,
@@ -7819,7 +6133,7 @@ final class CompanionManager: ObservableObject {
                     "error": error.localizedDescription
                 ]
             )
-            speakShortSystemResponse("native clicking hit a blocker: \(error.localizedDescription)")
+            showShortSystemResponse("native clicking hit a blocker: \(error.localizedDescription)")
             markRequestCompleted(
                 route: "native_cua.click",
                 executionStartedAt: executionStartedAt,
@@ -7913,7 +6227,7 @@ final class CompanionManager: ObservableObject {
                         "windowID": typed.windowID
                     ]
                 )
-                speakShortSystemResponse("searching Messages for \(personName).")
+                showShortSystemResponse("searching Messages for \(personName).")
                 markRequestCompleted(
                     route: "background_computer_use.messages_search",
                     executionStartedAt: executionStartedAt,
@@ -7943,7 +6257,7 @@ final class CompanionManager: ObservableObject {
                         "error": error.localizedDescription
                     ]
                 )
-                speakShortSystemResponse("Background Computer Use hit a blocker searching Messages: \(error.localizedDescription)")
+                showShortSystemResponse("Background Computer Use hit a blocker searching Messages: \(error.localizedDescription)")
                 markRequestCompleted(
                     route: "background_computer_use.messages_search",
                     executionStartedAt: executionStartedAt,
@@ -7997,7 +6311,7 @@ final class CompanionManager: ObservableObject {
                         "textLength": request.text.count
                     ]
                 )
-                speakShortSystemResponse(acknowledgement)
+                showShortSystemResponse(acknowledgement)
                 markRequestCompleted(
                     route: "background_computer_use.type_text",
                     executionStartedAt: executionStartedAt,
@@ -8022,7 +6336,7 @@ final class CompanionManager: ObservableObject {
                         "error": error.localizedDescription
                     ]
                 )
-                speakShortSystemResponse("Background Computer Use typing hit a blocker: \(error.localizedDescription)")
+                showShortSystemResponse("Background Computer Use typing hit a blocker: \(error.localizedDescription)")
                 markRequestCompleted(
                     route: "background_computer_use.type_text",
                     executionStartedAt: executionStartedAt,
@@ -8083,7 +6397,7 @@ final class CompanionManager: ObservableObject {
                     ]
                 )
                 if shouldSpeak {
-                    speakShortSystemResponse(acknowledgement)
+                    showShortSystemResponse(acknowledgement)
                 }
                 markRequestCompleted(
                     route: "background_computer_use.press_key",
@@ -8112,7 +6426,7 @@ final class CompanionManager: ObservableObject {
                     ]
                 )
                 if shouldSpeak {
-                    speakShortSystemResponse("Background Computer Use key press hit a blocker: \(error.localizedDescription)")
+                    showShortSystemResponse("Background Computer Use key press hit a blocker: \(error.localizedDescription)")
                 }
                 markRequestCompleted(
                     route: "background_computer_use.press_key",
@@ -8192,7 +6506,7 @@ final class CompanionManager: ObservableObject {
                         "error": "No focused Messages window"
                     ]
                 )
-                speakShortSystemResponse("opened Messages, but I couldn't focus its search field.")
+                showShortSystemResponse("opened Messages, but I couldn't focus its search field.")
                 markRequestCompleted(
                     route: "native_cua.messages_search",
                     executionStartedAt: executionStartedAt,
@@ -8229,7 +6543,7 @@ final class CompanionManager: ObservableObject {
                         "instruction": instruction
                     ]
                 )
-                speakShortSystemResponse("searching Messages for \(personName).")
+                showShortSystemResponse("searching Messages for \(personName).")
                 markRequestCompleted(
                     route: "native_cua.messages_search",
                     executionStartedAt: executionStartedAt,
@@ -8259,7 +6573,7 @@ final class CompanionManager: ObservableObject {
                         "error": error.localizedDescription
                     ]
                 )
-                speakShortSystemResponse("Messages search hit a native CUA blocker: \(error.localizedDescription)")
+                showShortSystemResponse("Messages search hit a native CUA blocker: \(error.localizedDescription)")
                 markRequestCompleted(
                     route: "native_cua.messages_search",
                     executionStartedAt: executionStartedAt,
@@ -8296,7 +6610,7 @@ final class CompanionManager: ObservableObject {
         }
 
         guard let targetWindow = nativeComputerUseController.refreshFocusedTarget() else {
-            speakShortSystemResponse("i don't have a target window to type into.")
+            showShortSystemResponse("i don't have a target window to type into.")
             markRequestCompleted(
                 route: "native_cua.type_text",
                 executionStartedAt: executionStartedAt,
@@ -8332,7 +6646,7 @@ final class CompanionManager: ObservableObject {
                     "textLength": request.text.count
                 ]
             )
-            speakShortSystemResponse(acknowledgement)
+            showShortSystemResponse(acknowledgement)
             markRequestCompleted(
                 route: "native_cua.type_text",
                 executionStartedAt: executionStartedAt,
@@ -8357,7 +6671,7 @@ final class CompanionManager: ObservableObject {
                     "error": error.localizedDescription
                 ]
             )
-            speakShortSystemResponse("native typing hit a blocker: \(error.localizedDescription)")
+            showShortSystemResponse("native typing hit a blocker: \(error.localizedDescription)")
             markRequestCompleted(
                 route: "native_cua.type_text",
                 executionStartedAt: executionStartedAt,
@@ -8395,7 +6709,7 @@ final class CompanionManager: ObservableObject {
 
         guard let targetWindow = nativeComputerUseController.refreshFocusedTarget() else {
             if shouldSpeak {
-                speakShortSystemResponse("i don't have a target window for that key press.")
+                showShortSystemResponse("i don't have a target window for that key press.")
             }
             markRequestCompleted(
                 route: "native_cua.press_key",
@@ -8438,7 +6752,7 @@ final class CompanionManager: ObservableObject {
                 ]
             )
             if shouldSpeak {
-                speakShortSystemResponse(acknowledgement)
+                showShortSystemResponse(acknowledgement)
             }
             markRequestCompleted(
                 route: "native_cua.press_key",
@@ -8467,7 +6781,7 @@ final class CompanionManager: ObservableObject {
                 ]
             )
             if shouldSpeak {
-                speakShortSystemResponse("native key press hit a blocker: \(error.localizedDescription)")
+                showShortSystemResponse("native key press hit a blocker: \(error.localizedDescription)")
             }
             markRequestCompleted(
                 route: "native_cua.press_key",
@@ -8542,7 +6856,7 @@ final class CompanionManager: ObservableObject {
         guard hasAccessibilityPermission, hasScreenRecordingPermission else { return }
         startPrewarmedScreenshotCaptureIfPossible()
         NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
-        notchCaptureWindowManager.showTextInput { [weak self] submittedText in
+        compactInputWindowManager.showTextInput { [weak self] submittedText in
             self?.submitNewAgentTaskFromUI(submittedText, source: "menu_bar_quick_task_prompt")
         }
     }
@@ -8553,7 +6867,7 @@ final class CompanionManager: ObservableObject {
 
         startPrewarmedScreenshotCaptureIfPossible()
         NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
-        notchCaptureWindowManager.showTextInput { [weak self] submittedText in
+        compactInputWindowManager.showTextInput { [weak self] submittedText in
             self?.submitNewAgentTaskFromUI(submittedText, source: "notch_shortcut_task_prompt")
         }
     }
@@ -8735,7 +7049,7 @@ final class CompanionManager: ObservableObject {
                 return try await self.linkedSessionTranscript(for: id)
             }
         } else { historyLoader = nil }
-        notchCaptureWindowManager.showConversationInput(entries: entries, historyVisible: historyVisible, title: title,
+        compactInputWindowManager.showConversationInput(entries: entries, historyVisible: historyVisible, title: title,
             taskChoices: choices,
             selectTask: { [weak self] id in _ = self?.showCompactConversationForAgentDockItem(id) },
             loadHistory: historyLoader,
@@ -8816,10 +7130,6 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    private func showTextModeInputAtCursor(activationPoint: CGPoint? = nil) {
-        showNotchTextInput()
-    }
-
     private func showNotchTextInput(
         accentTheme: ClickyAccentTheme? = nil,
         submitText: ((String) -> Void)? = nil
@@ -8829,7 +7139,7 @@ final class CompanionManager: ObservableObject {
 
         startPrewarmedScreenshotCaptureIfPossible()
         NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
-        notchCaptureWindowManager.showTextInput(
+        compactInputWindowManager.showTextInput(
             accentTheme: accentTheme,
             submitText: submitText ?? { [weak self] submittedText in
                 self?.submitTextModePrompt(submittedText)
@@ -8930,7 +7240,7 @@ final class CompanionManager: ObservableObject {
                     "instructionPreview": String(trimmedTranscript.prefix(120))
                 ]
             )
-            speakShortSystemResponse("i only caught part of that. try the agent follow-up again.")
+            showShortSystemResponse("i only caught part of that. try the agent follow-up again.")
             return true
         }
         // The user explicitly targeted an agent from the dock/HUD — either by
@@ -8956,7 +7266,7 @@ final class CompanionManager: ObservableObject {
         )
 
         guard let session = codexAgentSessions.first(where: { $0.id == sessionID }) else {
-            speakShortSystemResponse("i lost track of that agent. open the agent dock and try again.")
+            showShortSystemResponse("i lost track of that agent. open the agent dock and try again.")
             markRequestCompleted(
                 route: "agent.followup",
                 executionStartedAt: executionStartedAt,
@@ -8991,7 +7301,7 @@ final class CompanionManager: ObservableObject {
                 "model": session.model
             ]
         )
-        speakShortSystemResponse("sent that to \(session.spokenAgentName).")
+        showShortSystemResponse("sent that to \(session.spokenAgentName).")
         return true
     }
 
@@ -9135,7 +7445,7 @@ final class CompanionManager: ObservableObject {
                 "model": session.model
             ]
         )
-        speakShortSystemResponse("sent that to \(session.spokenAgentName).")
+        showShortSystemResponse("sent that to \(session.spokenAgentName).")
         return true
     }
 
@@ -9167,7 +7477,7 @@ final class CompanionManager: ObservableObject {
                     "instruction": request.instruction
                 ]
             )
-            speakShortSystemResponse("i couldn't find an agent called \(request.agentName).")
+            showShortSystemResponse("i couldn't find an agent called \(request.agentName).")
             markRequestCompleted(
                 route: route,
                 executionStartedAt: executionStartedAt,
@@ -9211,9 +7521,9 @@ final class CompanionManager: ObservableObject {
            !followUpText.isEmpty {
             submitAgentPrompt(followUpText, to: session)
             extra["followUpTextLength"] = "\(followUpText.count)"
-            speakShortSystemResponse("sent that to \(session.spokenAgentName).")
+            showShortSystemResponse("sent that to \(session.spokenAgentName).")
         } else {
-            speakShortSystemResponse("switched to \(session.spokenAgentName).")
+            showShortSystemResponse("switched to \(session.spokenAgentName).")
         }
 
         markRequestCompleted(
@@ -9361,440 +7671,6 @@ final class CompanionManager: ObservableObject {
     /// silently absorb every subsequent voice turn.
     // MARK: - Speculative pre-fire
 
-    private func resetSpeculativeFireForNewUtterance() {
-        discardActiveSpeculativeFire(reason: "new_utterance")
-        speculativeFireCountThisUtterance = 0
-        lastObservedPartial = nil
-        lastObservedPartialAt = nil
-        speculativeStabilityDwellTask?.cancel()
-        speculativeStabilityDwellTask = nil
-    }
-
-    /// Tracks the latest interim transcript and re-arms a stability
-    /// dwell timer. When the partial holds steady for 1.5s and passes
-    /// the eligibility predicate, fires a speculative Claude call on
-    /// its own background Task. Multi-threaded by design — the fire's
-    /// HTTP request, screenshot use, and token buffering all run
-    /// outside the main actor.
-    private func observePartialForSpeculativePreFire(_ partialTranscript: String) {
-        guard speculativePreFireEnabled else { return }
-        guard !partialTranscript.isEmpty else { return }
-        // If a fire is already running for the SAME partial prefix
-        // we're still extending, leave it alone — the extension may
-        // simply finish the same sentence and the running call will
-        // commit cleanly. Only re-fire when the partial has changed
-        // its meaning (i.e., extended past the fired-against prefix
-        // by enough words to be a different question).
-        if let active = activeSpeculativeFire,
-           partialTranscript.hasPrefix(active.partialTranscript),
-           SpokenText.wordCount(in: partialTranscript) - SpokenText.wordCount(in: active.partialTranscript) < 4 {
-            lastObservedPartial = partialTranscript
-            lastObservedPartialAt = Date()
-            return
-        }
-
-        // Partial diverged — discard any in-flight fire so the next
-        // stable window can produce a fresh one.
-        if let active = activeSpeculativeFire,
-           !partialTranscript.hasPrefix(active.partialTranscript) {
-            discardActiveSpeculativeFire(reason: "partial_diverged")
-        }
-
-        lastObservedPartial = partialTranscript
-        lastObservedPartialAt = Date()
-
-        speculativeStabilityDwellTask?.cancel()
-        let snapshot = partialTranscript
-        speculativeStabilityDwellTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            await MainActor.run {
-                guard let self else { return }
-                guard self.speculativePreFireEnabled else { return }
-                guard self.lastObservedPartial == snapshot else { return }
-                guard self.activeSpeculativeFire == nil else { return }
-                guard self.speculativeFireCountThisUtterance < Self.speculativeMaxFiresPerUtterance else { return }
-                guard Self.partialIsEligibleForSpeculativeFire(snapshot) else { return }
-                self.fireSpeculativePreFire(forPartial: snapshot)
-            }
-        }
-    }
-
-    /// Predicate gating which partials are worth a speculative fire.
-    /// Conservative — must look like a pure standalone question with
-    /// no screen reference, no correction, no agent intent.
-    private static func partialIsEligibleForSpeculativeFire(_ partialTranscript: String) -> Bool {
-        let normalized = partialTranscript
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            .lowercased()
-
-        guard SpokenText.wordCount(in: normalized) >= speculativeMinWordCount else { return false }
-        if quickLocalVoiceResponseText(for: partialTranscript) != nil { return false }
-
-        // Reject anything that already routes elsewhere.
-        if isAgentRoutingCandidate(partialTranscript) { return false }
-        if explicitNewTaskInstruction(from: partialTranscript) != nil { return false }
-        if agentTaskCreationInstruction(from: partialTranscript) != nil { return false }
-        if clickyAgentInstruction(from: partialTranscript) != nil { return false }
-        if permissiveAgentInstruction(from: partialTranscript) != nil { return false }
-        if isCancelAllAgentTasksRequest(partialTranscript) { return false }
-        if isCancelCurrentAgentTaskRequest(partialTranscript) { return false }
-
-        // Reject deictic / correction phrasings — these almost always
-        // depend on screen state or imply the user is mid-revision.
-        let deicticBlocklist = [
-            " this", " that", " here", " these", " those",
-            " no,", " no.", " actually", " wait", " scratch", " i mean",
-            " click", " press", " type", " open ", " close ",
-            " switch ", " show me", " hide ", " select ",
-            " screen", " can you see", " do you see", " looking at",
-            " the file", " the button",
-            " the window", " the panel", " the menu", " this app",
-            " that app", " that file", " this tab"
-        ]
-        for needle in deicticBlocklist where normalized.contains(needle) {
-            return false
-        }
-
-        // Require the partial to start with a question/conversational lead.
-        let allowedLeads = [
-            "what ", "what's ", "whats ", "who ", "who's ", "whos ",
-            "why ", "when ", "where ", "how ", "is ", "are ", "do ",
-            "does ", "can you ", "could you ", "would you ", "should i ",
-            "tell me ", "explain ", "summarize ", "describe ",
-            "give me ", "help me understand "
-        ]
-        for lead in allowedLeads where normalized.hasPrefix(lead) {
-            return true
-        }
-        return false
-    }
-
-
-    /// Fires the speculative Claude call. Tokens stream into the
-    /// active fire's buffer but are NOT pushed through TTS yet — the
-    /// audio path waits for `commitSpeculativeFire`.
-    private func fireSpeculativePreFire(forPartial partialTranscript: String) {
-        speculativeFireCountThisUtterance += 1
-        let firedAt = Date()
-
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "outgoing",
-            event: "speculative.fire",
-            fields: [
-                "partialTranscript": partialTranscript,
-                "fireOrdinal": speculativeFireCountThisUtterance,
-                "voiceModel": selectedModel
-            ]
-        )
-
-        // Speculative pre-fire already hides model latency by starting
-        // while the user is still talking. Do not add a filler; it makes
-        // committed text-only responses sound stitched together.
-        let chosenFiller: FillerPhraseLibrary.FillerSelection? = nil
-        let assistantPrefillText: String? = nil
-
-        // Track buffered text on the actor; the streaming closure pushes
-        // appends here. The Task runs detached for the HTTP work.
-        let speculativeBufferRef = SpeculativeBufferRef()
-        let speculativeFireForCapture = partialTranscript
-        let task = Task<String, Error> { [weak self] in
-            guard let self else { throw CancellationError() }
-
-            // Use the prewarmed screenshot if it's fresh — don't
-            // recapture mid-utterance. Stale = falls back to no image.
-            let labeledImages: [(data: Data, label: String)] = await MainActor.run {
-                guard self.prewarmedScreenshotTask != nil,
-                      let started = self.prewarmedScreenshotStartedAt,
-                      Date().timeIntervalSince(started) <= Self.prewarmedScreenshotMaxAge else {
-                    return [(data: Data, label: String)]()
-                }
-                // Don't consume the prewarmed task here — the final
-                // path may still need it. Leave it in place; we just
-                // peek at its current value via a separate await.
-                return []
-            }
-
-            let history = await MainActor.run {
-                self.voiceConversationHistoryForAPI()
-            }
-
-            let voiceSystemPrompt = await MainActor.run { self.currentVoiceResponseSystemPrompt() }
-
-            let userPromptForClaude: String = {
-                if labeledImages.isEmpty {
-                    return "\(speculativeFireForCapture)\n\nNo screenshot is available. Answer from the transcript only and use [POINT:none]."
-                }
-                return speculativeFireForCapture
-            }()
-
-            do {
-                return try await self.analyzeVoiceResponse(
-                    images: labeledImages,
-                    systemPrompt: voiceSystemPrompt,
-                    conversationHistory: history,
-                    userPrompt: userPromptForClaude,
-                    assistantPrefill: assistantPrefillText,
-                    onTextChunk: { accumulatedText in
-                        speculativeBufferRef.value = accumulatedText
-                    }
-                )
-            } catch {
-                throw error
-            }
-        }
-
-        activeSpeculativeFire = SpeculativeFire(
-            partialTranscript: partialTranscript,
-            firedAt: firedAt,
-            task: task,
-            bufferedContinuation: "",
-            assistantPrefillText: assistantPrefillText,
-            imagesUsed: 0,
-            chosenFiller: chosenFiller
-        )
-        // Watch the buffer ref so we can update bufferedContinuation
-        // — it's a class so the closure mutates the same storage.
-        Task { [weak self] in
-            while !(self?.activeSpeculativeFireTaskIsDone ?? true) {
-                try? await Task.sleep(nanoseconds: 50_000_000)
-                await MainActor.run {
-                    self?.activeSpeculativeFire?.bufferedContinuation = speculativeBufferRef.value
-                }
-            }
-            await MainActor.run {
-                self?.activeSpeculativeFire?.bufferedContinuation = speculativeBufferRef.value
-            }
-        }
-    }
-
-    /// True only when there is no active fire OR the fire's task has
-    /// completed. Used by the buffer-mirror loop to know when to stop.
-    private var activeSpeculativeFireTaskIsDone: Bool {
-        guard let task = activeSpeculativeFire?.task else { return true }
-        return task.isCancelled
-    }
-
-    /// Cancel + drop any in-flight speculative fire. Called when the
-    /// partial diverges, the user disables the feature, or the final
-    /// transcript doesn't match.
-    private func discardActiveSpeculativeFire(reason: String) {
-        guard let active = activeSpeculativeFire else { return }
-        active.task.cancel()
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "speculative.discard",
-            fields: [
-                "reason": reason,
-                "firedPartial": active.partialTranscript,
-                "bufferedChars": active.bufferedContinuation.count
-            ]
-        )
-        activeSpeculativeFire = nil
-    }
-
-    /// If the final transcript matches (prefix-equal to) the partial
-    /// we speculatively fired against, return the active fire so the
-    /// caller can commit its buffered tokens straight to TTS. Returns
-    /// nil otherwise; caller falls through to the normal response path.
-    private func consumeSpeculativeFireIfMatches(_ finalTranscript: String) -> SpeculativeFire? {
-        guard let active = activeSpeculativeFire else { return nil }
-        let normalized = finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-        let firedNormalized = active.partialTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Accept exact match OR final extends the partial by ≤4 words
-        // (Deepgram often delivers a slightly longer final after the
-        // last interim — punctuation, smart-format additions).
-        let isExactMatch = normalized == firedNormalized
-        let extensionWords = SpokenText.wordCount(in: normalized) - SpokenText.wordCount(in: firedNormalized)
-        let isCleanExtension = normalized.hasPrefix(firedNormalized) && extensionWords >= 0 && extensionWords <= 4
-        guard isExactMatch || isCleanExtension else {
-            discardActiveSpeculativeFire(reason: "final_diverged")
-            return nil
-        }
-
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "speculative.commit",
-            fields: [
-                "firedPartial": active.partialTranscript,
-                "finalTranscript": normalized,
-                "extensionWords": extensionWords,
-                "bufferedChars": active.bufferedContinuation.count,
-                "elapsedSeconds": Date().timeIntervalSince(active.firedAt)
-            ]
-        )
-        activeSpeculativeFire = nil
-        return active
-    }
-
-    /// Mutable container for token-stream buffering across the actor
-    /// boundary. The streaming `onTextChunk` closure runs on the main
-    /// actor; the Task that polls the buffer also runs on main, so
-    /// access is serialized. We use a class so the captured reference
-    /// in the closure points to the same storage as the polling loop.
-    private final class SpeculativeBufferRef: @unchecked Sendable {
-        var value: String = ""
-    }
-
-    /// Hands a matched speculative fire to the live TTS pipeline.
-    /// Schedules the filler PCM head-of-queue, then pumps any tokens
-    /// already buffered through the sentence streamer, then awaits the
-    /// in-flight Claude task for the tail. Mirrors the late half of
-    /// `sendTranscriptToClaudeWithScreenshot`.
-    private func commitSpeculativeFire(_ fire: SpeculativeFire, transcript: String) {
-        interruptCurrentVoiceResponse()
-        let timing = activeRequestTiming
-        let executionStartedAt = markRequestExecutionStarted(
-            route: "voice.response",
-            timing: timing,
-            extra: voiceResponseExecutionFields()
-        )
-        let ttsStartedAt = Date()
-        var didMarkAudioStarted = false
-
-        let responseTaskToken = UUID()
-        currentResponseTaskToken = responseTaskToken
-        currentResponseTask = Task {
-            defer { self.clearCurrentResponseTask(ifMatches: responseTaskToken) }
-            self.voiceState = .processing
-            var didCompleteRequest = false
-            func completeRequest(status: String = "success", extra: [String: Any] = [:]) async {
-                await MainActor.run {
-                    guard !didCompleteRequest else { return }
-                    didCompleteRequest = true
-                    var fields = self.voiceResponseExecutionFields()
-                    extra.forEach { fields[$0.key] = $0.value }
-                    fields["speculativeCommit"] = true
-                    self.markRequestCompleted(
-                        route: "voice.response",
-                        executionStartedAt: executionStartedAt,
-                        timing: timing,
-                        status: status,
-                        extra: fields
-                    )
-                }
-            }
-
-            do {
-                let streamingTTSSession: StreamingTTSSession? = !AppBundleConfiguration.isVoicePlaybackEnabled ? nil : self.voiceTTSClient.beginStreamingResponse {
-                    guard !didMarkAudioStarted else { return }
-                    didMarkAudioStarted = true
-                    self.voiceState = .responding
-                    self.markRequestStageCompleted(
-                        route: "voice.response",
-                        stage: "tts_audio_started",
-                        stageStartedAt: ttsStartedAt,
-                        timing: timing,
-                        extra: [
-                            "executor": "tts",
-                            "executionMethod": "voiceTTSClient.beginStreamingResponse",
-                            "controller": "voiceTTSClient",
-                            "speculativeCommit": true
-                        ]
-                    )
-                }
-
-                if let chosenFiller = fire.chosenFiller {
-                    streamingTTSSession?.enqueuePrebakedSamples(chosenFiller.samples)
-                }
-
-                // Push whatever tokens have already accumulated. The
-                // speculative call may have completed already, in
-                // which case fire.task.value returns immediately;
-                // otherwise we drain the live continuation as it
-                // arrives.
-                var emittedSpokenSoFar = ""
-                let pushDelta: (String) -> Void = { parsedSpoken in
-                    let safeSpoken = Self.stripTrailingVisualGuidanceTagFragment(parsedSpoken)
-                    guard safeSpoken.hasPrefix(emittedSpokenSoFar),
-                          safeSpoken.count > emittedSpokenSoFar.count else { return }
-                    let delta = String(safeSpoken.dropFirst(emittedSpokenSoFar.count))
-                    emittedSpokenSoFar = safeSpoken
-                    streamingTTSSession?.appendText(delta)
-                }
-
-                // Drain the buffered continuation already collected
-                // before the task finishes.
-                let preTaskBuffer = fire.bufferedContinuation
-                if !preTaskBuffer.isEmpty {
-                    let parsed = Self.parsePointingCoordinates(from: preTaskBuffer).spokenText
-                    pushDelta(parsed)
-                }
-
-                // Wait for the speculative task to finish — it may
-                // already be done. Then push any tail tokens.
-                let continuationText: String
-                do {
-                    continuationText = try await fire.task.value
-                } catch is CancellationError {
-                    streamingTTSSession?.cancel()
-                    await completeRequest(status: "cancelled", extra: ["cancelledAt": "speculative_task"])
-                    return
-                } catch {
-                    print("⚠️ Speculative commit failed: \(error)")
-                    streamingTTSSession?.cancel()
-                    speakResponseFailureFallback(error, showsInBubble: true)
-                    await completeRequest(status: "failed", extra: ["error": error.localizedDescription])
-                    return
-                }
-
-                let finalParsed = Self.parsePointingCoordinates(from: continuationText).spokenText
-                pushDelta(finalParsed)
-
-                let fullResponseText: String = {
-                    if let prefill = fire.assistantPrefillText, !prefill.isEmpty {
-                        return Self.combinedVoiceResponseText(
-                            prefill: prefill,
-                            continuation: continuationText
-                        )
-                    }
-                    return continuationText
-                }()
-                let parseResult = Self.parsePointingCoordinates(from: fullResponseText)
-                let spokenText = parseResult.spokenText
-
-                self.rememberVoiceExchange(
-                    userTranscript: transcript,
-                    assistantResponse: spokenText,
-                    reason: "speculative_commit"
-                )
-
-                ClickyAnalytics.trackAIResponseReceived(response: spokenText)
-                self.latestVoiceResponseCard = ClickyResponseCard(
-                    source: .voice,
-                    rawText: spokenText,
-                    contextTitle: transcript
-                )
-
-                if Self.responseOffersAgentSpawn(spokenText) {
-                    self.pendingAgentOfferInstruction = transcript
-                    self.pendingAgentOfferAt = Date()
-                } else {
-                    self.pendingAgentOfferInstruction = nil
-                    self.pendingAgentOfferAt = nil
-                }
-
-                if !spokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    do {
-                        try await streamingTTSSession?.finish()
-                    } catch {
-                        guard !Self.isExpectedCancellation(error) else {
-                            await completeRequest(status: "cancelled", extra: ["cancelledAt": "tts"])
-                            return
-                        }
-                        ClickyAnalytics.trackTTSError(error: error.localizedDescription)
-                        speakResponseFailureFallback(error)
-                    }
-                } else {
-                    streamingTTSSession?.cancel()
-                }
-
-                await completeRequest(extra: ["speculativeCommit": true])
-            }
-        }
-    }
 
     private static func isLikelyAgentFollowUpPhrasing(_ transcript: String) -> Bool {
         let normalized = transcript
@@ -9959,7 +7835,7 @@ final class CompanionManager: ObservableObject {
         clearVoiceResponseCaptionAndInteractiveBubble()
         latestVoiceResponseCard = nil
 
-        speakShortSystemResponse(
+        showShortSystemResponse(
             "cleared.",
             route: "voice.clear_overlays",
             timing: timing,
@@ -10046,7 +7922,7 @@ final class CompanionManager: ObservableObject {
             rawText: response,
             contextTitle: "Agent tasks"
         )
-        speakShortSystemResponse(response)
+        showShortSystemResponse(response)
     }
 
     private func cancelCurrentAgentTask() {
@@ -10061,7 +7937,7 @@ final class CompanionManager: ObservableObject {
             ]
         )
         guard let session = latestSteerableAgentSession() else {
-            speakShortSystemResponse("there isn't an active agent task to cancel.")
+            showShortSystemResponse("there isn't an active agent task to cancel.")
             markRequestCompleted(
                 route: "agent.cancel_current",
                 executionStartedAt: executionStartedAt,
@@ -10090,7 +7966,7 @@ final class CompanionManager: ObservableObject {
                 "title": session.title
             ]
         )
-        speakShortSystemResponse("cancelled \(session.spokenAgentName).")
+        showShortSystemResponse("cancelled \(session.spokenAgentName).")
     }
 
     func stopCodexAgentSession(_ sessionID: UUID, reason: String = "agent.stop_button") {
@@ -10146,7 +8022,7 @@ final class CompanionManager: ObservableObject {
     private func startExplicitAgentTaskIfRequested(from transcript: String) -> Bool {
         if let newTaskInstruction = Self.explicitNewTaskInstruction(from: transcript) {
             guard !newTaskInstruction.isEmpty else {
-                speakShortSystemResponse("what should the new task be?")
+                showShortSystemResponse("what should the new task be?")
                 return true
             }
 
@@ -10155,13 +8031,13 @@ final class CompanionManager: ObservableObject {
         }
 
         if Self.isIncompleteExplicitNewTaskRequest(from: transcript) {
-            speakShortSystemResponse("what should the new task be?")
+            showShortSystemResponse("what should the new task be?")
             return true
         }
 
         if let taskCreationInstruction = Self.agentTaskCreationInstruction(from: transcript) {
             guard !taskCreationInstruction.isEmpty else {
-                speakShortSystemResponse("what should the agent do?")
+                showShortSystemResponse("what should the agent do?")
                 return true
             }
 
@@ -10197,7 +8073,7 @@ final class CompanionManager: ObservableObject {
         }
 
         if Self.isIncompleteAgentTaskCreationRequest(from: transcript) {
-            speakShortSystemResponse("what should the agent do?")
+            showShortSystemResponse("what should the agent do?")
             return true
         }
 
@@ -10212,7 +8088,7 @@ final class CompanionManager: ObservableObject {
 
         guard !explicitInstruction.isEmpty else {
             print("OpenClicky agent trigger detected without an instruction.")
-            speakShortSystemResponse("what should the agent do?")
+            showShortSystemResponse("what should the agent do?")
             return true
         }
 
@@ -10229,7 +8105,7 @@ final class CompanionManager: ObservableObject {
                         "requestID": activeRequestTiming?.requestID ?? "none"
                     ]
                 )
-                speakShortSystemResponse("what should the agent do?")
+                showShortSystemResponse("what should the agent do?")
                 return true
             }
 
@@ -10287,7 +8163,7 @@ final class CompanionManager: ObservableObject {
             return true
         }
         if Self.isIncompleteLocalAppOpenRequest(from: instruction) {
-            speakShortSystemResponse("what app should I open?")
+            showShortSystemResponse("what app should I open?")
             return true
         }
 
@@ -10637,7 +8513,7 @@ final class CompanionManager: ObservableObject {
             rawText: responseText,
             contextTitle: transcript
         )
-        speakShortSystemResponse(
+        showShortSystemResponse(
             responseText,
             route: "voice.quick_local_response",
             timing: timing,
@@ -10670,7 +8546,7 @@ final class CompanionManager: ObservableObject {
             ensureCursorOverlayVisibleForAgentTask()
             showAgentDockWindowNearCurrentScreen()
         }
-        speakShortSystemResponse(summary)
+        showShortSystemResponse(summary)
         markRequestCompleted(
             route: "agent.status",
             executionStartedAt: executionStartedAt,
@@ -10755,7 +8631,7 @@ final class CompanionManager: ObservableObject {
         }
 
         guard !runningSessions.isEmpty else { return }
-        guard voiceState == .idle, !voiceTTSClient.isPlaying else { return }
+        guard voiceState == .idle else { return }
 
         // Only narrate sessions that have substantively new activity since
         // the last time we spoke about them. No filler — "we're working"
@@ -10794,7 +8670,7 @@ final class CompanionManager: ObservableObject {
             lastAgentProgressNarrationSignatures[update.session.id] = update.phrase
         }
         lastAgentProgressNarrationAt = now
-        speakShortSystemResponse(updateText)
+        showShortSystemResponse(updateText)
     }
 
     /// Build the spoken phrase for an in-flight agent. Returns `nil` when
@@ -13535,21 +11411,6 @@ final class CompanionManager: ObservableObject {
             .first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
-    private static func legacyClickyAgentInstruction(from transcript: String) -> String? {
-        let triggerPattern = #"\b(?:hey[\s,]+)?(?:open[\s,.-]*)?clicky[\s,.-]+agent\b"#
-        guard let triggerRange = transcript.range(
-            of: triggerPattern,
-            options: [.regularExpression, .caseInsensitive, .diacriticInsensitive]
-        ) else {
-            return nil
-        }
-
-        let rawInstruction = String(transcript[triggerRange.upperBound...])
-        let trimmedInstruction = rawInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanedInstruction = trimmedInstruction.trimmingCharacters(in: CharacterSet(charactersIn: ".,:;!?- "))
-        return cleanedInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     private func startVoiceAgentTaskPlan(
         instruction: String,
         acknowledgement: String? = nil,
@@ -13637,7 +11498,7 @@ final class CompanionManager: ObservableObject {
                         "requestID": activeRequestTiming?.requestID ?? "none"
                     ]
                 )
-                speakShortSystemResponse("that looks like an internal OpenClicky runtime event, not a task.")
+                showShortSystemResponse("that looks like an internal OpenClicky runtime event, not a task.")
                 return
             }
             OpenClickyMessageLogStore.shared.append(
@@ -13688,7 +11549,7 @@ final class CompanionManager: ObservableObject {
                 "instructionLength": instruction.count
             ]
         )
-        if interruptVoiceResponse && !voiceTTSClient.isPlaying && !openAIRealtimeSpeechClient.isPlaying && !deepgramVoiceAgentClient.isPlaying {
+        if interruptVoiceResponse {
             interruptCurrentVoiceResponse()
         }
         ensureCursorOverlayVisibleForAgentTask()
@@ -13815,43 +11676,8 @@ final class CompanionManager: ObservableObject {
             )
 
             guard speakAcknowledgement else { return }
-            guard AppBundleConfiguration.isVoicePlaybackEnabled else {
-                beginCursorReplyPresentation()
-                updateVoiceResponseCaption("<cursor_reply>" + acknowledgement + "</cursor_reply>", force: true, updatesDock: false)
-                return
-            }
-
-            // Give the dock item a short settle window before speaking.
-            // The cursor remains in place while the separate agent
-            // representation appears in the dock.
-            try? await Task.sleep(nanoseconds: 350_000_000)
-
-            let responseTaskToken = UUID()
-            currentResponseTaskToken = responseTaskToken
-            currentResponseTask = Task { [acknowledgement, dockItemID] in
-                defer { self.clearCurrentResponseTask(ifMatches: responseTaskToken) }
-                guard await self.waitForSystemAnnouncementSlot(sessionID: nil, maxWaitSeconds: 8.0) else { return }
-                await MainActor.run { self.voiceState = .processing }
-                do {
-                    try await voiceTTSClient.speakText(acknowledgement) {
-                        Task { @MainActor in self.voiceState = .responding }
-                    }
-                } catch {
-                    guard !Self.isExpectedCancellation(error) else { return }
-                    ClickyAnalytics.trackTTSError(error: error.localizedDescription)
-                    print("ElevenLabs TTS error: \(error)")
-                    await MainActor.run { self.speakResponseFailureFallback(error) }
-                }
-
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
-                await MainActor.run {
-                    self.clearAgentDockCaption(for: dockItemID)
-                    if !Task.isCancelled {
-                        self.voiceState = .idle
-                        self.scheduleTransientHideIfNeeded()
-                    }
-                }
-            }
+            beginCursorReplyPresentation()
+            updateVoiceResponseCaption("<cursor_reply>" + acknowledgement + "</cursor_reply>", force: true, updatesDock: false)
         }
     }
 
@@ -13864,25 +11690,6 @@ final class CompanionManager: ObservableObject {
         let normalizedRoute = route
             .replacingOccurrences(of: #"\.split$"#, with: "", options: .regularExpression)
         return "\(normalizedRoute)|\(normalizedInstruction)"
-    }
-
-    /// Returns a normalized fingerprint for deduplicating realtime voice
-    /// route events: strips leading filler then fully normalizes.
-    static func realtimeVoiceRouteFingerprint(_ transcript: String) -> String {
-        SpokenText.normalizedSpokenCommandText(
-            SpokenText.normalizedCommandCandidate(from: transcript)
-        )
-    }
-
-    /// Returns true when two realtime-route fingerprints represent the same
-    /// utterance: exact match OR one is a prefix of the other (minimum 3
-    /// words in the shorter side, to avoid collapsing unrelated short commands).
-    static func isDuplicateRealtimeVoiceRouteFingerprint(_ a: String, _ b: String) -> Bool {
-        guard !a.isEmpty, !b.isEmpty else { return false }
-        if a == b { return true }
-        let (shorter, longer) = a.count <= b.count ? (a, b) : (b, a)
-        guard SpokenText.wordCount(in: shorter) >= 3 else { return false }
-        return longer.hasPrefix(shorter)
     }
 
     /// Every submitted cursor request presents a real app-owned pointer/reply immediately.
@@ -13917,49 +11724,6 @@ final class CompanionManager: ObservableObject {
         overlayWindowManager.hasShownOverlayBefore = true
         overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
         isOverlayVisible = true
-    }
-
-    private func directComputerUseAgentBoundaryCueText() -> String {
-        switch selectedComputerUseBackend {
-        case .backgroundComputerUse:
-            return "routing that through Background Computer Use."
-        case .nativeSwift:
-            return "routing that through OpenClicky's native CUA path."
-        }
-    }
-
-    private func showDirectComputerUseDockCue(caption: String) {
-        let dockItemID = UUID()
-        let dockItem = ClickyAgentDockItem(
-            id: dockItemID,
-            sessionID: nil,
-            title: selectedComputerUseBackend.label,
-            userInstruction: caption,
-            accentTheme: Self.nextAgentDockAccentTheme(existingCount: agentDockItems.count),
-            status: .done,
-            progressStageLabel: "Completed",
-            progressStepText: caption,
-            activityStatusLines: [caption],
-            caption: caption,
-            suggestedNextActions: [],
-            createdAt: Date()
-        )
-        agentDockItems.append(dockItem)
-        if agentDockItems.count > 6 {
-            agentDockItems.removeFirst(agentDockItems.count - 6)
-        }
-        refreshAgentDockFollowBehavior()
-        scheduleStatusSync()
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-            guard let self else { return }
-            self.agentDockItems.removeAll { $0.id == dockItemID && $0.sessionID == nil }
-            if self.agentDockItems.isEmpty {
-                self.agentDockWindowManager.hide()
-            }
-            self.refreshAgentDockFollowBehavior()
-            self.scheduleStatusSync()
-        }
     }
 
     private func cancelPendingAgentDockItemRemoval(for sessionID: UUID) {
@@ -14458,7 +12222,7 @@ final class CompanionManager: ObservableObject {
         // cutting in. The queued path is important: an agent can finish
         // while the user has already started the next push-to-talk turn,
         // and completion speech must not feed back into the microphone.
-        // Previously this called `speakShortSystemResponse(line)` directly,
+        // Previously this called `showShortSystemResponse(line)` directly,
         // whose `interruptCurrentVoiceResponse()` would chop the
         // acknowledgement TTS mid-sentence when fast tasks completed
         // before the acknowledgement finished playing. Now we wait for
@@ -14514,7 +12278,7 @@ final class CompanionManager: ObservableObject {
                 guard await self.waitForSystemAnnouncementSlot(sessionID: sessionID) else { return }
             }
             self.speakingSystemAnnouncementSessionID = sessionID
-            self.speakShortSystemResponse(line, interruptExisting: false)
+            self.showShortSystemResponse(line, interruptExisting: false)
             await self.waitForVoicePlaybackToIdle()
             if self.speakingSystemAnnouncementSessionID == sessionID {
                 self.speakingSystemAnnouncementSessionID = nil
@@ -14556,7 +12320,7 @@ final class CompanionManager: ObservableObject {
     @MainActor
     private func waitForVoicePlaybackToIdle(maxWaitSeconds: TimeInterval = 8.0) async {
         let start = Date()
-        while voiceTTSClient.isPlaying || openAIRealtimeSpeechClient.isPlaying || deepgramVoiceAgentClient.isPlaying {
+        while voiceState == .responding {
             if Task.isCancelled { return }
             if Date().timeIntervalSince(start) >= maxWaitSeconds { return }
             try? await Task.sleep(nanoseconds: 50_000_000)
@@ -14581,8 +12345,7 @@ final class CompanionManager: ObservableObject {
                         "sessionID": sessionID?.uuidString ?? "",
                         "voiceState": String(describing: voiceState),
                         "dictationInProgress": buddyDictationManager.isDictationInProgress,
-                        "realtimeCaptureActive": isRealtimeBidirectionalVoiceCaptureActive,
-                        "ttsPlaying": voiceTTSClient.isPlaying
+                        "dictationActive": buddyDictationManager.isDictationInProgress
                     ]
                 )
                 return false
@@ -14594,9 +12357,7 @@ final class CompanionManager: ObservableObject {
 
     @MainActor
     private var systemAnnouncementAudioWouldCollideWithVoiceInput: Bool {
-        if voiceTTSClient.isPlaying || openAIRealtimeSpeechClient.isPlaying || deepgramVoiceAgentClient.isPlaying { return true }
         if buddyDictationManager.isDictationInProgress { return true }
-        if isRealtimeBidirectionalVoiceCaptureActive { return true }
         switch voiceState {
         case .listening, .processing, .responding:
             return true
@@ -14842,10 +12603,19 @@ final class CompanionManager: ObservableObject {
                     "sessionID": sessionID.uuidString
                 ]
             )
-            notchCaptureWindowManager.showMainInterfacePanel(companionManager: self, focusedAgentSessionID: sessionID)
+            showAgentTask(sessionID)
             return
         }
-        notchCaptureWindowManager.showMainInterfacePanel(companionManager: self)
+        showAgentTask(nil)
+    }
+
+    /// Opens an agent task's conversation in the compact panel, or the current compact task when none is given.
+    func showAgentTask(_ sessionID: UUID?) {
+        if let sessionID {
+            selectCodexAgentSession(sessionID)
+            if showCompactConversationForAgentDockItem(sessionID) { return }
+        }
+        showTutorConversation()
     }
 
     func closeAgentDockPanel() {
@@ -15091,7 +12861,7 @@ final class CompanionManager: ObservableObject {
                         "instructionPreview": Self.voiceArchiveSnippet(trimmedPrompt, limit: 240)
                     ]
                 )
-                speakShortSystemResponse("that looks like an internal OpenClicky runtime event, not a task.")
+                showShortSystemResponse("that looks like an internal OpenClicky runtime event, not a task.")
                 return nil
             }
             OpenClickyMessageLogStore.shared.append(
@@ -15372,18 +13142,7 @@ final class CompanionManager: ObservableObject {
         currentResponseTask?.cancel()
         currentResponseTask = nil
         currentResponseTaskToken = nil
-        realtimeBidirectionalVoiceTask?.cancel()
-        realtimeBidirectionalVoiceTask = nil
-        realtimeBidirectionalVoiceTurnGeneration &+= 1
-        isRealtimeBidirectionalVoiceCaptureActive = false
-        isRealtimeBidirectionalVoiceInputReady = false
-        pendingRealtimeBidirectionalFinishSource = nil
         codexVoiceSession.cancelActiveTurn(reason: "voice_response_interrupted")
-        openAIRealtimeSpeechClient.cancelBidirectionalVoiceTurn()
-        voiceTTSClient.cancelBidirectionalVoiceTurn()
-        openAIRealtimeSpeechClient.stopPlayback()
-        deepgramVoiceAgentClient.stopPlayback()
-        voiceTTSClient.stopPlayback()
         clearVoiceResponseCaptionAndInteractiveBubble()
         if !buddyDictationManager.isDictationInProgress {
             currentAudioPowerLevel = 0
@@ -15710,11 +13469,6 @@ final class CompanionManager: ObservableObject {
         return sanitized + "-" + String(UUID().uuidString.prefix(8))
     }
 
-    private func clearAgentDockCaption(for itemID: UUID) {
-        guard let itemIndex = agentDockItems.firstIndex(where: { $0.id == itemID }) else { return }
-        agentDockItems[itemIndex].caption = nil
-    }
-
     private func agentDockTargetScreen() -> NSScreen? {
         let mouseLocation = NSEvent.mouseLocation
         return NSScreen.screen(containingOrNearestTo: mouseLocation)
@@ -15753,7 +13507,7 @@ final class CompanionManager: ObservableObject {
             rawText: line,
             contextTitle: "Caption playback test"
         )
-        speakShortSystemResponse(line)
+        showShortSystemResponse(line)
         updateVoiceResponseCaption(line, force: true)
         let currentCaption = cursorOverlayState.externalPrimaryCaptionText
         externalProxyClearTask = Task { [weak self] in
@@ -15833,7 +13587,8 @@ final class CompanionManager: ObservableObject {
         return parsed.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func speakShortSystemResponse(
+    /// Shows a short system message (confirmation, prompt, or announcement) in the pointer bubble.
+    private func showShortSystemResponse(
         _ text: String,
         interruptExisting: Bool = true,
         route: String? = nil,
@@ -15841,132 +13596,13 @@ final class CompanionManager: ObservableObject {
         executionStartedAt: Date? = nil,
         extra: [String: Any] = [:]
     ) {
-        // Muted replies (the default) are shown instead of spoken. Attempting speech here failed and its
-        // error path cleared the bubble, hiding agent results moments after they appeared.
-        guard AppBundleConfiguration.isVoicePlaybackEnabled else {
-            if interruptExisting { interruptCurrentVoiceResponse() }
-            beginCursorReplyPresentation()
-            updateVoiceResponseCaption("<cursor_reply>" + text + "</cursor_reply>", force: true, updatesDock: false)
-            if let route {
-                var fields = extra
-                fields["spokenTextLength"] = text.count
-                fields["audioPlaybackState"] = "muted"
-                markRequestCompleted(route: route, executionStartedAt: executionStartedAt, timing: timing, extra: fields)
-            }
-            return
-        }
-        if interruptExisting {
-            interruptCurrentVoiceResponse()
-        }
-        let responseTaskToken = UUID()
-        currentResponseTaskToken = responseTaskToken
-        currentResponseTask = Task {
-            defer { self.clearCurrentResponseTask(ifMatches: responseTaskToken) }
-            self.voiceState = .processing
-            let ttsStartedAt = Date()
-            var didMarkAudioStarted = false
-            do {
-                try await voiceTTSClient.speakText(text) {
-                    self.voiceState = .responding
-                    guard let route, !didMarkAudioStarted else { return }
-                    didMarkAudioStarted = true
-                    var fields = extra
-                    fields["executor"] = "tts"
-                    fields["executionMethod"] = self.activeTTSExecutionMethodSpeakText
-                    fields["controller"] = self.activeTTSControllerName
-                    fields["spokenTextLength"] = text.count
-                    self.markRequestStageCompleted(
-                        route: route,
-                        stage: "tts_audio_started",
-                        stageStartedAt: ttsStartedAt,
-                        timing: timing,
-                        extra: fields
-                    )
-                }
-
-                self.scheduleVoiceResponseCaptionClear()
-
-                if let route {
-                    var stageFields = extra
-                    stageFields["executor"] = "tts"
-                    stageFields["executionMethod"] = self.activeTTSExecutionMethodSpeakText
-                    stageFields["controller"] = self.activeTTSControllerName
-                    stageFields["spokenTextLength"] = text.count
-                    self.markRequestStageCompleted(
-                        route: route,
-                        stage: "tts_playback_finished",
-                        stageStartedAt: ttsStartedAt,
-                        timing: timing,
-                        extra: stageFields
-                    )
-                    var completionFields = extra
-                    completionFields["spokenTextLength"] = text.count
-                    completionFields["audioPlaybackState"] = Self.voiceResponseCompletionAudioPlaybackState(
-                        spokenText: text,
-                        playbackFinished: true
-                    )
-                    self.markRequestCompleted(
-                        route: route,
-                        executionStartedAt: executionStartedAt,
-                        timing: timing,
-                        extra: completionFields
-                    )
-                }
-            } catch {
-                guard !Self.isExpectedCancellation(error) else {
-                    if let route {
-                        var fields = extra
-                        fields["cancelledAt"] = "tts"
-                        fields["spokenTextLength"] = text.count
-                        fields["audioPlaybackState"] = Self.voiceResponseCompletionAudioPlaybackState(
-                            spokenText: text,
-                            playbackFinished: false
-                        )
-                        self.markRequestCompleted(
-                            route: route,
-                            executionStartedAt: executionStartedAt,
-                            timing: timing,
-                            status: "cancelled",
-                            extra: fields
-                        )
-                    }
-                    self.clearVoiceResponseCaptionAndInteractiveBubble()
-                    return
-                }
-                self.clearVoiceResponseCaptionAndInteractiveBubble()
-                speakResponseFailureFallback(error)
-                if let route {
-                    var stageFields = extra
-                    stageFields["executor"] = "tts"
-                    stageFields["executionMethod"] = self.activeTTSExecutionMethodSpeakText
-                    stageFields["controller"] = self.activeTTSControllerName
-                    stageFields["error"] = error.localizedDescription
-                    self.markRequestStageCompleted(
-                        route: route,
-                        stage: didMarkAudioStarted ? "tts_playback_finished" : "tts_audio_started",
-                        stageStartedAt: ttsStartedAt,
-                        timing: timing,
-                        status: "failed",
-                        extra: stageFields
-                    )
-                    var completionFields = extra
-                    completionFields["error"] = error.localizedDescription
-                    self.markRequestCompleted(
-                        route: route,
-                        executionStartedAt: executionStartedAt,
-                        timing: timing,
-                        status: "failed",
-                        extra: completionFields
-                    )
-                }
-            }
-
-            if !Task.isCancelled {
-                self.lastVoiceInteractionCompletedAt = Date()
-                self.voiceState = .idle
-                scheduleTransientHideIfNeeded()
-            }
-        }
+        if interruptExisting { interruptCurrentVoiceResponse() }
+        beginCursorReplyPresentation()
+        updateVoiceResponseCaption("<cursor_reply>" + text + "</cursor_reply>", force: true, updatesDock: false)
+        guard let route else { return }
+        var fields = extra
+        fields["responseTextLength"] = text.count
+        markRequestCompleted(route: route, executionStartedAt: executionStartedAt, timing: timing, extra: fields)
     }
 
     private static let companionVoiceResponseSystemPrompt = """
@@ -16032,40 +13668,6 @@ final class CompanionManager: ObservableObject {
     - user asks what html is: "html stands for hypertext markup language, it's basically the skeleton of every web page. curious how it connects to the css you're looking at? [POINT:none]"
     - user asks how to commit in xcode: "see that source control menu up top? click that and hit commit, or you can use command option c as a shortcut. [POINT:285,11:source control]"
     - element is on screen 2 (not where cursor is): "that's over on your other monitor — see the terminal window? [POINT:400,300:terminal:screen2]"
-    """
-
-    private static let companionRealtimeVoiceSystemPrompt = """
-    you're clicky, a friendly always-on companion that lives in the user's menu bar. the user just spoke to you through OpenClicky's realtime voice path. your reply is spoken directly as audio, so write only the natural words the user should hear. this is an ongoing conversation — you remember everything they've said before.
-
-    YOUR JOB IS NARROW. you only do these things:
-    1. GIVE ADVICE, EXPLAIN, and ANSWER QUESTIONS conversationally — including conceptual coding questions, walkthroughs, "what does this mean", "how would i", etc.
-    2. SEARCH THE WEB conversationally when the user asks. answer from your own general knowledge; if the user explicitly wants live/current data (today's weather, latest price, breaking news), give a brief handoff-style acknowledgement; OpenClicky routes that kind of task to Agent Mode.
-    3. ROUTE WORK NATURALLY — simple conversational help stays in voice, direct computer-control is handled by OpenClicky's computer-use path, and concrete file/code/research/settings/log work should be handed to Agent Mode when the user is asking OpenClicky to actually carry it out rather than merely talking through an idea.
-
-    YOU DO NOT, EVER:
-    - run code, run commands, run shell, run terminal, run python, run scripts
-    - read, write, edit, create, move, delete, rename, organize, or inspect files or folders on disk
-    - modify settings, config, memory, skills, logs, soul.md, or any OpenClicky state
-    - perform any filesystem, git, build, install, or refactor work
-    - include any control tags, point tags, coordinate tags, markdown, brackets, or hidden routing markers in your answer
-
-    keep the user's normal conversation in this voice lane. if they are reflecting, brainstorming, or asking a pure capability question, answer conversationally first. but if they are asking OpenClicky to actually do deeper tool work — for example fix code, inspect logs, change settings, research something current, or work on files — call the background-agent tool even if they did not explicitly say the word "agent".
-
-    if the user asks you to do anything in the "DO NOT" list and it is concrete tool work, do not explain that an agent would be needed — call the background-agent tool. only stay conversational when the user is discussing whether something is possible, reflecting on design, or otherwise not asking you to execute the work yet.
-
-    when the user clearly mentions "agent" / "start an agent" / "spin up an agent" / "ask an agent", or when you decide the task needs Agent Mode, call the background-agent tool instead of talking about the route. if you do speak after routing, keep it to a brief acknowledgement like "on it."
-
-    response style:
-    - default to one or two sentences. be direct and dense. sound like a capable coworker over the user's shoulder, not a formal report. if the user asks you to explain more or go deeper, give a thorough explanation with no length cap — but still no file edits, no commands, just words.
-    - all lowercase, casual, warm. no emojis.
-    - write for the ear, not the eye. short sentences. no lists, bullets, markdown, headings, tables, or code blocks.
-    - don't use abbreviations or symbols that sound weird read aloud. write "for example" not "e.g.", spell out small numbers.
-    - never say "simply" or "just".
-    - don't read out code verbatim. describe what code does conversationally.
-    - don't end with dead-end yes/no questions ("want me to explain more?"). when it fits, plant a seed — mention something bigger or related they could try.
-
-    realtime output rule:
-    because this path speaks audio directly, never say or output OpenClicky's internal point-control syntax. do not say "point none", "point control", "open bracket point", coordinates, or anything resembling [POINT:none]. if a visual target would help, describe it naturally in words instead.
     """
 
     private func runtimeStorageContextForVoicePrompt() -> String {
@@ -16252,41 +13854,6 @@ final class CompanionManager: ObservableObject {
         """
     }
 
-
-    func currentRealtimeVoiceSystemPrompt() -> String {
-        let memoryContext = codexHomeManager.persistentMemoryContext()
-        return """
-        \(Self.companionRealtimeVoiceSystemPrompt)
-
-        \(currentRealtimeRoutingContextPrompt())
-
-        \(currentAppSkillContextPrompt())
-
-        \(runtimeStorageContextForVoicePrompt())
-
-        persistent memory:
-        read this as durable user/project context. do not say you cannot remember outside the conversation; use this memory.
-
-        \(memoryContext)
-        """
-    }
-
-    private func currentRealtimeRoutingContextPrompt() -> String {
-        let voiceModel = OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel)
-        let computerUseModel = OpenClickyModelCatalog.computerUseModel(withID: selectedComputerUseModel)
-        let backend = selectedComputerUseBackend
-        return """
-        OpenClicky realtime routing:
-        - voice inference model: \(voiceModel.id) (\(voiceModel.label))
-        - realtime audio input path: \(activeRealtimeInputPath)
-        - selected computer-use backend: \(backend.rawValue) (\(backend.label))
-        - selected computer-use model: \(computerUseModel.id) (\(computerUseModel.provider.rawValue), \(computerUseModel.label))
-        - background Agent Mode model: \(codexAgentSession.model)
-        - keep spoken voice inference on the realtime model. for direct computer-control requests, including app-plus-action commands like "open Spotify and play a track", call OpenClicky's computer-use tool so the app can execute through the selected backend. do not route ordinary app control to Agent Mode just because it has more than one step. for deeper file, code, research, settings, logs, builds, installs, refactors, or long-running work, call the background-agent tool so Agent Mode can run on the full configured model, even when the user did not explicitly say "agent".
-        - when background work has several parts, choose the agent shape deliberately: keep tightly coupled work in one background agent, but split into multiple background-agent calls when the user explicitly asks for multiple/separate/parallel agents or the request clearly contains independent workstreams that can run safely side by side.
-        - temporary visual guidance is not computer-use and not Agent Mode. if the user asks OpenClicky to point, highlight, draw a rectangle, box an area, circle something, draw around something, scribble, trace, mark, or put a shape around visible screen content, do not say you'll get another system to do it and do not call a routing tool. let OpenClicky's screen-aware voice-response path handle it directly.
-        """
-    }
 
     func currentTutorModeSystemPrompt() -> String {
         """

@@ -85,14 +85,12 @@ expect(claudeDefault.provider.voiceBackendFamily == .claude, "claude family maps
 let codexDefault = OpenClickyModelCatalog.voiceResponseModel(withID: OpenClickyVoiceBackendFamily.codex.defaultModelID)
 expect(codexDefault.provider.voiceBackendFamily == .codex, "codex family default maps to codex family")
 expect(OpenClickyVoiceBackendFamily.apple.defaultModelID == OpenClickyModelCatalog.appleFoundationModelID, "apple default model id")
-expect(claudeDefault.provider == .anthropic && !OpenClickyModelCatalog.isSpeechModelID(claudeDefault.id), "claude default is a text response model")
+expect(claudeDefault.provider == .anthropic, "claude default is a text response model")
 expect(OpenClickyVoiceBackendFamily.codex.defaultModelID == OpenClickyModelCatalog.defaultCodexActionsModelID, "codex default model id")
 expect(OpenClickyVoiceBackendFamily.allCases.count == 3, "exactly three families")
 expect(Set(OpenClickyVoiceBackendFamily.allCases.map(\.rawValue)) == Set(["apple", "codex", "claude"]), "family raw values")
 
-let speech = OpenClickyModelCatalog.voiceResponseModel(withID: OpenClickyModelCatalog.defaultSpeechModelID)
-expect(OpenClickyModelCatalog.isSpeechModelID(speech.id), "default speech is speech model")
-expect(speech.provider == .openAI, "realtime speech provider is openAI")
+expect(OpenClickyModelCatalog.voiceResponseModel(withID: "gpt-realtime-2.1-mini").id == OpenClickyModelCatalog.defaultVoiceResponseModelID, "removed realtime model migrates to the text default")
 
 // --- Discovery ---
 let rows = OpenClickyProviderDiscovery.availability()

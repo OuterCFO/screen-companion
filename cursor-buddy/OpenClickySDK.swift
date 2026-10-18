@@ -123,14 +123,6 @@ public final class OpenClickySDKSession: ObservableObject {
         manager.setCodexAgentAPIKey(key)
     }
 
-    public func setElevenLabsAPIKey(_ key: String) {
-        manager.setElevenLabsAPIKey(key)
-    }
-
-    public func setCartesiaAPIKey(_ key: String) {
-        manager.setCartesiaAPIKey(key)
-    }
-
     /// Build an embedded panel view pre-wired to this session.
     public func makePanelView(
         isPanelPinned: Bool = false,

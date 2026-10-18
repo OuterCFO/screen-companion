@@ -840,58 +840,6 @@ struct CompanionPanelView: View {
         .padding(.vertical, 6)
     }
 
-    private func permissionRow(
-        label: String,
-        iconName: String,
-        isGranted: Bool,
-        settingsURL: String
-    ) -> some View {
-        HStack {
-            HStack(spacing: 4) {
-                Image(systemName: iconName)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(isGranted ? DS.Colors.textTertiary : DS.Colors.warning)
-                    .frame(width: 16)
-
-                Text(label)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(DS.Colors.textSecondary)
-            }
-
-            Spacer()
-
-            if isGranted {
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(DS.Colors.success)
-                        .frame(width: 6, height: 6)
-                    Text("Granted")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(DS.Colors.success)
-                }
-            } else {
-                Button(action: {
-                    if let url = URL(string: settingsURL) {
-                        NSWorkspace.shared.open(url)
-                    }
-                }) {
-                    Text("Grant")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(DS.Colors.textOnAccent)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule()
-                                .fill(DS.Colors.accent)
-                        )
-                }
-                .buttonStyle(.plain)
-                .pointerCursor()
-            }
-        }
-        .padding(.vertical, 6)
-    }
-
     private func showAccessibilityPermissionDragAssistant() {
         WindowPositionManager.guideAccessibilityPermissionWithDragAssistant()
         companionManager.pointAtPermissionDragAssistant()
@@ -977,28 +925,6 @@ struct CompanionPanelView: View {
             .labelsHidden()
             .tint(DS.Colors.accent)
             .scaleEffect(0.8)
-        }
-        .padding(.vertical, 4)
-    }
-
-    private var speechToTextProviderRow: some View {
-        HStack {
-            HStack(spacing: 4) {
-                Image(systemName: "waveform")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(DS.Colors.textTertiary)
-                    .frame(width: 16)
-
-                Text("Transcription provider")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(DS.Colors.textSecondary)
-            }
-
-            Spacer()
-
-            Text(companionManager.buddyDictationManager.transcriptionProviderDisplayName)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(DS.Colors.textTertiary)
         }
         .padding(.vertical, 4)
     }
@@ -1245,23 +1171,6 @@ struct CompanionPanelView: View {
     }
 
     // MARK: - Footer
-
-    private var footerSection: some View {
-        HStack {
-            Button(action: onQuit) {
-                HStack(spacing: 6) {
-                    Image(systemName: "power")
-                        .font(.system(size: 11, weight: .medium))
-                    Text("Quit OpenClicky")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .foregroundColor(DS.Colors.textTertiary)
-            }
-            .buttonStyle(.plain)
-            .pointerCursor()
-
-        }
-    }
 
     // MARK: - Visual Helpers
 

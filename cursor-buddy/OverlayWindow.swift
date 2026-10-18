@@ -315,34 +315,6 @@ private struct OpenClickyCalibrationCursorBoxView: View {
 }
 
 // PreferenceKey for tracking bubble size
-struct SizePreferenceKey: PreferenceKey {
-    static let defaultValue: CGSize = .zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        value = nextValue()
-    }
-}
-
-struct NavigationBubbleSizePreferenceKey: PreferenceKey {
-    static let defaultValue: CGSize = .zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        value = nextValue()
-    }
-}
-
-struct AgentTaskBubbleSizePreferenceKey: PreferenceKey {
-    static let defaultValue: CGSize = .zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        value = nextValue()
-    }
-}
-
-struct ExternalProxyBubbleSizePreferenceKey: PreferenceKey {
-    static let defaultValue: CGSize = .zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        value = nextValue()
-    }
-}
-
 /// The buddy's behavioral mode. Controls whether it follows the cursor,
 /// is flying toward a detected UI element, or is pointing at an element.
 
@@ -490,8 +462,6 @@ struct BlueCursorView: View {
     @State private var welcomeText: String = ""
     @State private var showWelcome: Bool = true
     @State private var bubbleSize: CGSize = .zero
-    @State private var agentTaskBubbleSize: CGSize = .zero
-    @State private var bubbleOpacity: Double = 1.0
     @State private var cursorOpacity: Double = 0.0
 
     // MARK: - Buddy Navigation State
@@ -577,7 +547,6 @@ struct BlueCursorView: View {
         )
     }
 
-    private let fullWelcomeMessage = "hey! i'm clicky"
     private var overlayCursorColor: Color {
         (ClickyAccentTheme(rawValue: selectedAccentThemeID) ?? .mint).cursorColor
     }
@@ -790,18 +759,6 @@ struct BlueCursorView: View {
         case .navigatingToTarget, .pointingAtTarget:
             return true
         }
-    }
-
-    private var shouldShowAgentTaskBubble: Bool {
-        buddyIsVisibleOnThisScreen
-            && buddyNavigationMode == .followingCursor
-            && !showWelcome
-            && cursorState.voiceState != .listening
-            && cursorState.voiceState != .processing
-    }
-
-    private var externalPrimaryCaptionColor: Color {
-        colorFromHex(cursorState.externalPrimaryCaptionAccentHex) ?? overlayCursorColor
     }
 
     private var externalSecondaryCursorsOnThisScreen: [OpenClickyExternalProxyCursor] {
@@ -1407,38 +1364,6 @@ struct BlueCursorView: View {
 
     // MARK: - Welcome Animation
 
-    private func startWelcomeAnimation() {
-        withAnimation(.easeIn(duration: 0.4)) {
-            self.bubbleOpacity = 1.0
-        }
-
-        var currentIndex = 0
-        // H8: capture the timer into @State (`welcomeTypingTimer`) so onDisappear
-        // can invalidate it. Previously the timer was a local (its `timer` param
-        // shadowed the dead @State `timer`), so an overlay disappear mid-typing
-        // left it firing against recycled state. BlueCursorView is a SwiftUI
-        // struct, so there is no retain cycle to guard against — capture `self`
-        // by value; @State writes go through SwiftUI's live backing storage.
-        let typingTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { timer in
-            guard currentIndex < fullWelcomeMessage.count else {
-                timer.invalidate()
-                welcomeTypingTimer = nil
-                // Hold the text for 2 seconds, then fade it out
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    bubbleOpacity = 0.0
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                    showWelcome = false
-                }
-                return
-            }
-
-            let index = fullWelcomeMessage.index(fullWelcomeMessage.startIndex, offsetBy: currentIndex)
-            welcomeText.append(fullWelcomeMessage[index])
-            currentIndex += 1
-        }
-        welcomeTypingTimer = typingTimer
-    }
 }
 
 private struct OpenClickyActiveControlGlowView: View {
@@ -2513,107 +2438,6 @@ private struct ClickyAgentDockItemView: View {
         case .failed:
             return "Agent task stopped"
         }
-    }
-}
-
-private struct ClickyAgentDockConversationPreview: View {
-    let item: ClickyAgentDockItem
-    let canOpenDashboard: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            conversationBubble(
-                label: "YOU",
-                content: { userBubbleText },
-                labelColor: Color(hex: "#FF7A9A"),
-                backgroundColor: Color(hex: "#341214").opacity(0.96),
-                borderColor: Color(hex: "#7F1D3A").opacity(0.42)
-            )
-
-            conversationBubble(
-                label: "AGENT",
-                content: { agentBubbleContent },
-                labelColor: item.accentTheme.cursorColor.opacity(0.95),
-                backgroundColor: item.accentTheme.cursorColor.opacity(0.12),
-                borderColor: item.accentTheme.cursorColor.opacity(0.28)
-            )
-        }
-        .frame(width: 430, alignment: .leading)
-        .shadow(color: item.accentTheme.cursorColor.opacity(0.18), radius: 18, x: 0, y: 8)
-        .shadow(color: Color.black.opacity(0.30), radius: 10, x: 0, y: 6)
-    }
-
-    private func conversationBubble<Content: View>(
-        label: String,
-        @ViewBuilder content: () -> Content,
-        labelColor: Color,
-        backgroundColor: Color,
-        borderColor: Color
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label)
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                .foregroundColor(labelColor)
-                .kerning(0.4)
-
-            content()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(backgroundColor)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(borderColor, lineWidth: 1)
-        )
-    }
-
-    /// The full user instruction — no clipping. The dock card width and
-    /// `lineLimit(nil)` let it wrap so the user sees exactly what was sent.
-    private var userBubbleText: some View {
-        Text(fullUserInstruction)
-            .font(.system(size: 13, weight: .medium))
-            .foregroundColor(DS.Colors.textPrimary)
-            .lineLimit(nil)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    /// Either the latest streamed assistant text, or a live "thinking"
-    /// indicator while we wait for the first token. Never the canned
-    /// "An agent is working on this." string.
-    @ViewBuilder
-    private var agentBubbleContent: some View {
-        let trimmedCaption = item.caption?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if trimmedCaption.isEmpty {
-            switch item.status {
-            case .starting, .running:
-                ClickyThinkingDots(tint: item.accentTheme.cursorColor)
-            case .done:
-                Text("Done.")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(item.accentTheme.cursorColor)
-            case .failed:
-                Text("Stopped.")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(DS.Colors.textPrimary)
-            }
-        } else {
-            Text(trimmedCaption)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(DS.Colors.textPrimary)
-                .lineLimit(nil)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var fullUserInstruction: String {
-        let fullInstruction = item.userInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !fullInstruction.isEmpty { return fullInstruction }
-        let trimmedTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmedTitle.isEmpty ? "hey there" : trimmedTitle
     }
 }
 

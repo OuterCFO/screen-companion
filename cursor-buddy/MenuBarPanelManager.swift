@@ -23,12 +23,6 @@ extension Notification.Name {
     static let clickyMainPanelResizeStateDidChange = Notification.Name("clickyMainPanelResizeStateDidChange")
 }
 
-/// Custom NSPanel subclass that can become the key window even with
-/// .nonactivatingPanel style, allowing text fields to receive focus.
-private class KeyablePanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-}
-
 @MainActor
 final class MenuBarPanelManager: NSObject {
     private var statusItem: NSStatusItem?
@@ -298,33 +292,7 @@ final class MenuBarPanelManager: NSObject {
     }
 
     private func showMainInterfacePanel() {
-        if OpenClickyPresentationPolicy.menuBarOnly {
-            companionManager.showTutorInput(startDictation: false)
-            return
-        }
-        hidePanel()
-        companionManager.notchCaptureWindowManager.showMainInterfacePanel(companionManager: companionManager)
-    }
-
-    private func showLegacyStatusItemPanel() {
-        let isCreatingPanel = panel == nil
-        if panel == nil {
-            createPanel()
-        }
-
-        if !isPanelPinned {
-            positionPanelBelowStatusItem(allowFittingSize: !isCreatingPanel)
-        } else {
-            enforcePanelMinimumSize()
-        }
-
-        panel?.makeKeyAndOrderFront(nil)
-        panel?.orderFrontRegardless()
-        installClickOutsideMonitor()
-
-        if isCreatingPanel {
-            resizeVisiblePanelToCurrentContent(after: 0.08)
-        }
+        companionManager.showTutorInput(startDictation: false)
     }
 
     private func hidePanel() {
@@ -332,73 +300,11 @@ final class MenuBarPanelManager: NSObject {
         removeClickOutsideMonitor()
     }
 
-    private func createPanel() {
-        let notchPanelView = OpenClickyNotchPanelView(
-            companionManager: companionManager,
-            isPanelPinned: isPanelPinned,
-            setPanelPinned: { [weak self] isPinned in
-                self?.setPanelPinned(isPinned)
-            }
-        )
-        .frame(
-            minWidth: panelWidth,
-            maxWidth: .infinity,
-            alignment: .topLeading
-        )
-
-        let hostingView = NSHostingView(rootView: notchPanelView)
-        hostingView.frame = NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight)
-        hostingView.autoresizingMask = [.width, .height]
-        hostingView.wantsLayer = true
-        hostingView.layer?.backgroundColor = .clear
-
-        let menuBarPanel = KeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
-            styleMask: [.borderless, .nonactivatingPanel, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-
-        menuBarPanel.isFloatingPanel = true
-        OpenClickyWindowLevels.applyPanelDialogLevel(to: menuBarPanel)
-        menuBarPanel.isOpaque = false
-        menuBarPanel.backgroundColor = .clear
-        menuBarPanel.hasShadow = false
-        menuBarPanel.hidesOnDeactivate = false
-        menuBarPanel.isExcludedFromWindowsMenu = true
-        menuBarPanel.isReleasedWhenClosed = false
-        menuBarPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        menuBarPanel.isMovableByWindowBackground = true
-        menuBarPanel.titleVisibility = .hidden
-        menuBarPanel.titlebarAppearsTransparent = true
-        applyPanelMinimumSize(to: menuBarPanel)
-
-        let containerView = OpenClickyGlassContainerView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight))
-        containerView.autoresizingMask = [.width, .height]
-        containerView.wantsLayer = true
-        containerView.layer?.backgroundColor = .clear
-
-        let backdrop = OpenClickyLiquidGlassBackdropView(cornerRadius: 28)
-        backdrop.frame = containerView.bounds
-        backdrop.autoresizingMask = [.width, .height]
-        glassBackdrop = backdrop
-        containerView.addSubview(backdrop)
-
-        hostingView.frame = containerView.bounds
-        containerView.addSubview(hostingView)
-
-        menuBarPanel.contentView = containerView
-        panel = menuBarPanel
-        applyPinnedPanelBehavior()
-        refreshThemeAppearance()
-        refreshGlassBackdropAccent()
-    }
-
     private func refreshGlassBackdropAccent() {
         glassBackdrop?.configure(
             cornerRadius: 28,
             roundsTopCorners: true,
-            accentColor: OpenClickyNotchCaptureWindowManager.nsAccentColor(for: nil),
+            accentColor: CompactInputWindowManager.nsAccentColor(for: nil),
             strength: .expanded
         )
     }
@@ -525,67 +431,7 @@ final class MenuBarPanelManager: NSObject {
         )
     }
 
-    private func applyPanelMinimumSize(to panel: NSPanel) {
-        panel.minSize = panelMinimumSize
-        panel.contentMinSize = panelMinimumSize
-    }
-
-    private func enforcePanelMinimumSize() {
-        guard let panel else { return }
-        let currentFrame = panel.frame
-        let constrainedWidth = max(currentFrame.width, panelMinimumSize.width)
-        let constrainedHeight = max(currentFrame.height, panelMinimumSize.height)
-
-        guard constrainedWidth != currentFrame.width || constrainedHeight != currentFrame.height else { return }
-
-        panel.setFrame(
-            NSRect(
-                x: currentFrame.origin.x,
-                y: currentFrame.maxY - constrainedHeight,
-                width: constrainedWidth,
-                height: constrainedHeight
-            ),
-            display: true
-        )
-    }
-
     // MARK: - Click Outside Dismissal
-
-    /// Installs a global event monitor that hides the panel when the user clicks
-    /// anywhere outside it — the same transient dismissal behavior as NSPopover.
-    /// Uses a short delay so that system permission dialogs (triggered by Grant
-    /// buttons in the panel) don't immediately dismiss the panel when they appear.
-    private func installClickOutsideMonitor() {
-        removeClickOutsideMonitor()
-        guard !isPanelPinned else { return }
-
-        clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]
-        ) { [weak self] event in
-            guard let self, let panel = self.panel else { return }
-
-            // Check if the click is inside the status item button — if so, the
-            // statusItemClicked handler will toggle the panel, so don't also hide.
-            let clickLocation = NSEvent.mouseLocation
-            if panel.frame.contains(clickLocation) {
-                return
-            }
-
-            // Delay dismissal slightly to avoid closing the panel when
-            // a system permission dialog appears (e.g. microphone access).
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                guard panel.isVisible else { return }
-
-                // If permissions aren't all granted yet, a system dialog
-                // may have focus — don't dismiss during onboarding.
-                if !self.companionManager.allPermissionsGranted && !NSApp.isActive {
-                    return
-                }
-
-                self.hidePanel()
-            }
-        }
-    }
 
     private func removeClickOutsideMonitor() {
         if let monitor = clickOutsideMonitor {
@@ -594,49 +440,6 @@ final class MenuBarPanelManager: NSObject {
         }
     }
 
-    private func setPanelPinned(_ isPinned: Bool) {
-        guard isPanelPinned != isPinned else { return }
-        isPanelPinned = isPinned
-        applyPinnedPanelBehavior()
-
-        guard let panel else { return }
-        if isPinned {
-            removeClickOutsideMonitor()
-            panel.makeKeyAndOrderFront(nil)
-            panel.orderFrontRegardless()
-        } else {
-            positionPanelBelowStatusItem()
-            if panel.isVisible {
-                installClickOutsideMonitor()
-            }
-        }
-    }
-
-    private func applyPinnedPanelBehavior() {
-        guard let panel else { return }
-
-        // Keep the panel visually consistent (floating + no title bar) in both
-        // pinned and transient modes. Pinning now only controls auto-dismiss.
-        // It still needs the shared dialog level so menu-bar overlays stay
-        // above the main panel instead of tucking underneath it.
-        panel.styleMask = [.borderless, .nonactivatingPanel, .resizable]
-        panel.title = ""
-        panel.titleVisibility = .hidden
-        panel.titlebarAppearsTransparent = true
-        panel.isMovableByWindowBackground = true
-        panel.isFloatingPanel = true
-        OpenClickyWindowLevels.applyPanelDialogLevel(to: panel)
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        applyPanelMinimumSize(to: panel)
-
-        panel.hidesOnDeactivate = false
-        panel.isExcludedFromWindowsMenu = true
-        panel.isReleasedWhenClosed = false
-        enforcePanelMinimumSize()
-    }
 }
 
 // MARK: - Agent Menu Bar Status Items
@@ -828,14 +631,10 @@ final class AgentMenuBarStatusManager: NSObject {
             return
         }
         if let sessionID = item.sessionID {
-            companionManager.selectCodexAgentSession(sessionID)
-            companionManager.notchCaptureWindowManager.showMainInterfacePanel(
-                companionManager: companionManager,
-                focusedAgentSessionID: sessionID
-            )
+            companionManager.showAgentTask(sessionID)
             return
         }
-        companionManager.notchCaptureWindowManager.showMainInterfacePanel(companionManager: companionManager)
+        companionManager.showAgentTask(nil)
     }
 
     private func openMenuBarAgentTextFollowUp(_ item: ClickyAgentDockItem, companionManager: CompanionManager?) {
@@ -980,13 +779,7 @@ final class AgentMenuBarStatusManager: NSObject {
 
     @objc private func openHistorySessionFromAgentMenu(_ sender: NSMenuItem) {
         guard let sessionID = sender.representedObject as? UUID else { return }
-        companionManager?.selectCodexAgentSession(sessionID)
-        if let companionManager {
-            companionManager.notchCaptureWindowManager.showMainInterfacePanel(
-                companionManager: companionManager,
-                focusedAgentSessionID: sessionID
-            )
-        }
+        companionManager?.showAgentTask(sessionID)
     }
 
     private func tooltip(for item: ClickyAgentDockItem) -> String {

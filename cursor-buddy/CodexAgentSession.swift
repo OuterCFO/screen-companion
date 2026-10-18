@@ -1833,11 +1833,6 @@ final class CodexAgentSession: ObservableObject, Identifiable {
         return "\(prefix)..."
     }
 
-    private static func strippingANSI(_ text: String) -> String {
-        let ansiPattern = #"\u{001B}\[[0-9;]*[A-Za-z]"#
-        return text.replacingOccurrences(of: ansiPattern, with: "", options: .regularExpression)
-    }
-
     private static func firstOpenableFileURL(in text: String, fileManager: FileManager = .default) -> URL? {
         for candidate in pathCandidates(in: text) {
             guard let fileURL = resolvedFileURL(from: candidate, fileManager: fileManager) else { continue }

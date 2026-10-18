@@ -42,53 +42,6 @@ extension CompanionManager {
         }
     }
 
-    private func startOnboardingPromptStream() {
-        let message = "press control + option and introduce yourself"
-        onboardingPromptText = ""
-        showOnboardingPrompt = true
-        onboardingPromptOpacity = 0.0
-
-        withAnimation(.easeIn(duration: 0.4)) {
-            onboardingPromptOpacity = 1.0
-        }
-
-        Task { @MainActor [weak self] in
-            for character in message {
-                guard let self else { return }
-                self.onboardingPromptText.append(character)
-                try? await Task.sleep(nanoseconds: 30_000_000)
-            }
-
-            try? await Task.sleep(nanoseconds: 10_000_000_000)
-            guard let self, self.showOnboardingPrompt else { return }
-            withAnimation(.easeOut(duration: 0.3)) {
-                self.onboardingPromptOpacity = 0.0
-            }
-            try? await Task.sleep(nanoseconds: 350_000_000)
-            self.showOnboardingPrompt = false
-            self.onboardingPromptText = ""
-        }
-    }
-
-    /// Gradually raises an AVPlayer's volume from its current level to the
-    /// target over the specified duration, creating a smooth audio fade-in.
-    private func fadeInVideoAudio(player: AVPlayer, targetVolume: Float, duration: Double) {
-        let steps = 20
-        let stepInterval = duration / Double(steps)
-        let volumeIncrement = (targetVolume - player.volume) / Float(steps)
-        var stepsRemaining = steps
-
-        Timer.scheduledTimer(withTimeInterval: stepInterval, repeats: true) { timer in
-            stepsRemaining -= 1
-            player.volume += volumeIncrement
-
-            if stepsRemaining <= 0 {
-                timer.invalidate()
-                player.volume = targetVolume
-            }
-        }
-    }
-
     // MARK: - Onboarding Demo Interaction
 
     private static let onboardingDemoSystemPrompt = """
@@ -309,9 +262,6 @@ extension CompanionManager {
         voiceFollowUpStopTask?.cancel()
         voiceFollowUpStopTask = nil
         ClickyAnalytics.trackPushToTalkReleased()
-        if finishBidirectionalRealtimeVoiceCaptureIfNeeded(source: "microphoneButton") {
-            return
-        }
         buddyDictationManager.stopPersistentDictationFromMicrophoneButton()
     }
 
@@ -323,19 +273,6 @@ extension CompanionManager {
         transientHideTask = nil
         voiceFollowUpStopTask?.cancel()
         ClickyAnalytics.trackPushToTalkStarted()
-
-        if shouldUseBidirectionalRealtimeVoiceInput {
-            startBidirectionalRealtimeVoiceCapture(source: "microphoneButton")
-            voiceFollowUpStopTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
-                await MainActor.run {
-                    guard let self else { return }
-                    self.voiceFollowUpStopTask = nil
-                    self.stopSDKVoiceCapture()
-                }
-            }
-            return
-        }
 
         clearDetectedElementLocation()
 

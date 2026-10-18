@@ -378,7 +378,7 @@ enum OpenClickyLiquidGlassWindowSurface {
         backdrop.configure(
             cornerRadius: cornerRadius,
             roundsTopCorners: roundsTopCorners,
-            accentColor: accentColor ?? OpenClickyNotchCaptureWindowManager.nsAccentColor(for: nil),
+            accentColor: accentColor ?? CompactInputWindowManager.nsAccentColor(for: nil),
             strength: strength
         )
         containerView.addSubview(backdrop)

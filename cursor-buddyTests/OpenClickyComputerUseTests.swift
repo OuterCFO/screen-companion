@@ -32,25 +32,6 @@ struct OpenClickyComputerUseTests {
         #expect(CompanionManager.testLocalFolderOpenTarget(from: "Take a look at /Users/jkneen/clawd/github/hf-realtime-voice — how could we integrate this into OpenClicky?") == nil)
     }
 
-    @Test func realtimeDoneTranscriptExtractionIgnoresTransportIds() throws {
-        let responseDone: [String: Any] = [
-            "type": "response.done",
-            "event_id": "event_DygDZLewDHSIBzmCqbYFv",
-            "response": [
-                "id": "resp_123",
-                "output": [
-                    [
-                        "type": "message",
-                        "content": [
-                            ["type": "output_text", "text": "Opening GitHub Desktop."]
-                        ]
-                    ]
-                ]
-            ]
-        ]
-        #expect(OpenAIRealtimeSpeechClient.testFirstTranscriptString(in: responseDone) == "Opening GitHub Desktop.")
-    }
-
     @Test func pastedLogsDoNotBecomeReminderCountCommands() throws {
         let pastedLogs = """
         find out why we're having issues
@@ -187,13 +168,6 @@ struct OpenClickyComputerUseTests {
         #expect(first == repeated)
     }
 
-    @Test func realtimeTwoIsTheDefaultVoiceInteractionModel() throws {
-        #expect(OpenClickyModelCatalog.defaultVoiceResponseModelID == "gpt-realtime-2.1-mini")
-        #expect(OpenClickyModelCatalog.defaultCodexActionsModelID != OpenClickyModelCatalog.defaultVoiceResponseModelID)
-        #expect(OpenClickyModelCatalog.speechModels.contains { $0.id == "gpt-realtime-2.1" })
-        #expect(OpenClickyModelCatalog.speechModels.contains { $0.id == "gpt-realtime-2.1-mini" })
-    }
-
     @Test func appleFoundationModelIsInVoiceCatalog() throws {
         let apple = OpenClickyModelCatalog.voiceResponseModel(withID: OpenClickyModelCatalog.appleFoundationModelID)
         #expect(apple.id == OpenClickyModelCatalog.appleFoundationModelID)
@@ -214,7 +188,6 @@ struct OpenClickyComputerUseTests {
 
         // Apple is offered in the settings response grid via responseVoiceModels.
         #expect(OpenClickyModelCatalog.responseVoiceModels.contains { $0.id == OpenClickyModelCatalog.appleFoundationModelID })
-        #expect(!OpenClickyModelCatalog.isSpeechModelID(OpenClickyModelCatalog.appleFoundationModelID))
     }
 
     @Test func providerDiscoveryReturnsThreeFamilies() throws {
@@ -239,66 +212,21 @@ struct OpenClickyComputerUseTests {
         #expect(policy.canPresent)
     }
 
-    @Test func retiredRealtimeTwoAliasMigratesToCurrentMiniDefault() throws {
-        #expect(OpenClickyModelCatalog.normalizedModelID("gpt-realtime-2") == "gpt-realtime-2.1-mini")
-        #expect(OpenClickyModelCatalog.voiceResponseModel(withID: "gpt-realtime-2").id == "gpt-realtime-2.1-mini")
-        #expect(OpenClickyModelCatalog.speechModel(withID: "gpt-realtime-2").id == "gpt-realtime-2.1-mini")
-        #expect(OpenClickyModelCatalog.isSpeechModelID("gpt-realtime-2"))
-        #expect(OpenClickyModelCatalog.computerUseModel(withID: "gpt-realtime-2").id == "gpt-realtime-2.1-mini")
-    }
-
-    @Test func unknownVoiceModelIDsFallBackToSpeechDefaultNotHaiku() throws {
-        let resolved = OpenClickyModelCatalog.voiceResponseModel(withID: "definitely-not-a-real-model-id")
-        #expect(resolved.id == OpenClickyModelCatalog.defaultVoiceResponseModelID)
-        #expect(OpenClickyModelCatalog.isSpeechModelID(resolved.id))
-        #expect(resolved.id != OpenClickyModelCatalog.defaultAnthropicResponseModelID)
-    }
-
-    @Test func realtimeTwoUsesLowReasoningEffortForVoiceLatency() throws {
-        #expect(OpenAIRealtimeSpeechClient.realtimeReasoningConfiguration(for: "gpt-realtime-2.1-mini")?["effort"] == "low")
-        #expect(OpenAIRealtimeSpeechClient.realtimeReasoningConfiguration(for: "gpt-realtime-2.1")?["effort"] == "low")
-        #expect(OpenAIRealtimeSpeechClient.realtimeReasoningConfiguration(for: "gpt-realtime-2")?["effort"] == "low")
-        #expect(OpenAIRealtimeSpeechClient.realtimeReasoningConfiguration(for: "gpt-realtime-1.5") == nil)
-    }
-
     @Test func voiceResponseModelsDoNotUseShortTTSGenerationCap() throws {
         let responseBudgets = OpenClickyModelCatalog.responseVoiceModels.map(\.maxOutputTokens)
         #expect(responseBudgets.allSatisfy { $0 >= 64_000 })
     }
 
-    @Test func realtimeModelsResolveToNonSpeechModelsOutsideRealtimeTransport() throws {
-        let analysisModel = OpenClickyModelCatalog.voiceAnalysisModel(withID: "gpt-realtime-2.1-mini")
-        #expect(analysisModel.id == OpenClickyModelCatalog.defaultVoiceAnalysisModelID)
-        #expect(!OpenClickyModelCatalog.isSpeechModelID(analysisModel.id))
-
-        let codexModel = OpenClickyModelCatalog.codexVoiceSessionModel(withID: "gpt-realtime-2.1-mini")
-        #expect(codexModel.id == OpenClickyModelCatalog.defaultCodexActionsModelID)
-        #expect(!OpenClickyModelCatalog.isSpeechModelID(codexModel.id))
+    @Test func removedRealtimeModelsMigrateToTheTextDefault() throws {
+        for legacyID in ["gpt-realtime-2", "gpt-realtime-2.1-mini", "gpt-realtime-2.1", "gpt-realtime-1.5", "deepgram-voice-agent"] {
+            #expect(OpenClickyModelCatalog.voiceResponseModel(withID: legacyID).id == OpenClickyModelCatalog.defaultVoiceResponseModelID)
+        }
+        #expect(OpenClickyModelCatalog.voiceResponseModel(withID: "definitely-not-a-real-model-id").id == OpenClickyModelCatalog.defaultVoiceResponseModelID)
     }
 
     @Test func nonSpeechModelsRemainSelectedForVoiceAnalysis() throws {
         #expect(OpenClickyModelCatalog.voiceAnalysisModel(withID: "gpt-5.6-sol").id == "gpt-5.6-sol")
         #expect(OpenClickyModelCatalog.codexVoiceSessionModel(withID: "gpt-5.6-sol").id == "gpt-5.6-sol")
-    }
-
-    @Test func realtimeVoiceUsesRealtimeForComputerUsePointing() throws {
-        #expect(
-            CompanionManager.testComputerUsePointingResolver(
-                selectedVoiceModelID: "gpt-realtime-2.1-mini",
-                selectedComputerUseModelID: "gpt-5.6-sol"
-            ) == "openai_realtime"
-        )
-    }
-
-    @Test func realtimeComputerUseModelUsesRealtimeAPIInsteadOfCodex() throws {
-        let model = OpenClickyModelCatalog.computerUseModel(withID: "gpt-realtime-2.1-mini")
-        #expect(model.provider == .openAI)
-        #expect(
-            CompanionManager.testComputerUsePointingResolver(
-                selectedVoiceModelID: "gpt-5.6-sol",
-                selectedComputerUseModelID: "gpt-realtime-2.1-mini"
-            ) == "openai_realtime"
-        )
     }
 
     @Test func nonRealtimeVoiceKeepsSelectedComputerUsePointingResolver() throws {

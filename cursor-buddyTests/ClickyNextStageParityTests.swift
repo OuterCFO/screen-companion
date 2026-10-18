@@ -7,14 +7,6 @@ import OCCore
 
 @MainActor
 struct ClickyNextStageParityTests {
-    @Test func debugDevModeUsesOpenClickyIdentityAndDisablesSideEffects() throws {
-        #expect(Bundle.main.bundleIdentifier == "com.jkneen.openclicky")
-        #expect(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String == "OpenClicky")
-        #expect(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String == "OpenClicky")
-        #expect(OpenClickyRuntimeMode.isDevelopmentBuild == true)
-        #expect(ClickyAnalytics.isEnabled == false)
-    }
-
 
     @Test func wikiManagerIndexesBundledWikiSeedAndSkills() throws {
         let resourcesRoot = URL(fileURLWithPath: "/Users/jkneen/Documents/GitHub/openclicky/AppResources/OpenClicky", isDirectory: true)

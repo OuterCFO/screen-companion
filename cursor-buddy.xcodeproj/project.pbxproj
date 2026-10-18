@@ -15,10 +15,8 @@
 		24D85D652FBEE5D8004FEDAD /* OCMarkdown in Frameworks */ = {isa = PBXBuildFile; productRef = 24D85D642FBEE5D8004FEDAD /* OCMarkdown */; };
 		24D85D672FBEE5D8004FEDAD /* OCMemory in Frameworks */ = {isa = PBXBuildFile; productRef = 24D85D662FBEE5D8004FEDAD /* OCMemory */; };
 		24D85D692FBEE5D8004FEDAD /* OCUI in Frameworks */ = {isa = PBXBuildFile; productRef = 24D85D682FBEE5D8004FEDAD /* OCUI */; };
-		24E363952FB3400600B27AB1 /* GLTFSceneKit in Frameworks */ = {isa = PBXBuildFile; productRef = AA00BB042F6500040039DA55 /* GLTFSceneKit */; };
 		AA00BB032F6500030039DA55 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = AA00BB022F6500020039DA55 /* Sparkle */; };
 		AA00BB072F6500070039DA55 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = AA00BB062F6500060039DA55 /* FluidAudio */; };
-		AA77D0032FBF00010039DA55 /* DynamicNotchKit in Frameworks */ = {isa = PBXBuildFile; productRef = AA77D0022FBF00010039DA55 /* DynamicNotchKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -90,9 +88,7 @@
 				24D85D632FBEE5D8004FEDAD /* OCCore in Frameworks */,
 				24D85D652FBEE5D8004FEDAD /* OCMarkdown in Frameworks */,
 				24D85D672FBEE5D8004FEDAD /* OCMemory in Frameworks */,
-				24E363952FB3400600B27AB1 /* GLTFSceneKit in Frameworks */,
 				AA00BB072F6500070039DA55 /* FluidAudio in Frameworks */,
-				AA77D0032FBF00010039DA55 /* DynamicNotchKit in Frameworks */,
 				AA00BB032F6500030039DA55 /* Sparkle in Frameworks */,
 				24D85D692FBEE5D8004FEDAD /* OCUI in Frameworks */,
 				24026C89304789F100DF2722 /* OCComputerUseCore in Frameworks */,
@@ -192,7 +188,6 @@
 			name = "cursor-buddy";
 			packageProductDependencies = (
 				AA00BB022F6500020039DA55 /* Sparkle */,
-				AA00BB042F6500040039DA55 /* GLTFSceneKit */,
 				AA00BB062F6500060039DA55 /* FluidAudio */,
 				24D85D622FBEE5D8004FEDAD /* OCCore */,
 				24D85D642FBEE5D8004FEDAD /* OCMarkdown */,
@@ -200,7 +195,6 @@
 				24D85D682FBEE5D8004FEDAD /* OCUI */,
 				0C2AFE5F8114A34812946E6A /* OCAutomation */,
 				0C06CB6EA4542C44288FF530 /* OCFoundation */,
-				AA77D0022FBF00010039DA55 /* DynamicNotchKit */,
 				24026C86304789D000DF2722 /* OCAudioCore */,
 				24026C88304789F100DF2722 /* OCComputerUseCore */,
 			);
@@ -294,9 +288,7 @@
 				0C9E34EA83DCFA4140B30C0B /* XCLocalSwiftPackageReference "Packages/OCFoundation" */,
 				0CA167E660E7F04CFA8FD1D3 /* XCLocalSwiftPackageReference "Packages/OCAutomation" */,
 				AA00BB012F6500010039DA55 /* XCRemoteSwiftPackageReference "Sparkle" */,
-				AA00BB052F6500050039DA55 /* XCRemoteSwiftPackageReference "GLTFSceneKit" */,
 				AA00BB082F6500080039DA55 /* XCRemoteSwiftPackageReference "FluidAudio" */,
-				AA77D0012FBF00010039DA55 /* XCRemoteSwiftPackageReference "DynamicNotchKit" */,
 				24026C843047897200DF2722 /* XCLocalSwiftPackageReference "Packages/OCAudioCore" */,
 				24026C853047898400DF2722 /* XCLocalSwiftPackageReference "Packages/OCComputerUseCore" */,
 			);
@@ -791,28 +783,12 @@
 				minimumVersion = 2.9.0;
 			};
 		};
-		AA00BB052F6500050039DA55 /* XCRemoteSwiftPackageReference "GLTFSceneKit" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/magicien/GLTFSceneKit";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.4.0;
-			};
-		};
 		AA00BB082F6500080039DA55 /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/FluidInference/FluidAudio.git";
 			requirement = {
 				kind = exactVersion;
 				version = 0.14.1;
-			};
-		};
-		AA77D0012FBF00010039DA55 /* XCRemoteSwiftPackageReference "DynamicNotchKit" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/MrKai77/DynamicNotchKit";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.1.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -863,20 +839,10 @@
 			package = AA00BB012F6500010039DA55 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
 		};
-		AA00BB042F6500040039DA55 /* GLTFSceneKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = AA00BB052F6500050039DA55 /* XCRemoteSwiftPackageReference "GLTFSceneKit" */;
-			productName = GLTFSceneKit;
-		};
 		AA00BB062F6500060039DA55 /* FluidAudio */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = AA00BB082F6500080039DA55 /* XCRemoteSwiftPackageReference "FluidAudio" */;
 			productName = FluidAudio;
-		};
-		AA77D0022FBF00010039DA55 /* DynamicNotchKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = AA77D0012FBF00010039DA55 /* XCRemoteSwiftPackageReference "DynamicNotchKit" */;
-			productName = DynamicNotchKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

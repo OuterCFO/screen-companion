@@ -10,21 +10,9 @@ import Security
 
 nonisolated enum AppBundleConfiguration {
     static let userAnthropicAPIKeyDefaultsKey = "openClickyAnthropicAPIKey"
-    static let userElevenLabsAPIKeyDefaultsKey = "openClickyElevenLabsAPIKey"
-    static let userElevenLabsVoiceIDDefaultsKey = "openClickyElevenLabsVoiceID"
-    static let userCartesiaAPIKeyDefaultsKey = "openClickyCartesiaAPIKey"
-    static let userCartesiaVoiceIDDefaultsKey = "openClickyCartesiaVoiceID"
-    static let userOpenAIRealtimeVoiceIDDefaultsKey = "openClickyOpenAIRealtimeVoiceID"
-    static let userMicrosoftEdgeVoiceIDDefaultsKey = "openClickyMicrosoftEdgeVoiceID"
     /// Deepgram TTS reuses the existing Deepgram STT API key
     /// (`userDeepgramAPIKeyDefaultsKey`). Only the voice/model is
     /// TTS-specific.
-    static let userDeepgramTTSVoiceDefaultsKey = "openClickyDeepgramTTSVoice"
-    static let userDeepgramVoiceAgentThinkModelDefaultsKey = "openClickyDeepgramVoiceAgentThinkModel"
-    static let userTTSProviderDefaultsKey = "openClickyTTSProvider"
-    static let openClickyVoicePlaybackVolumeDefaultsKey = "openClickyVoicePlaybackVolume"
-    static let defaultVoicePlaybackVolume = 0.0
-    static let userSpeculativePreFireDefaultsKey = "openClickySpeculativePreFireEnabled"
     static let userVoiceResponseCaptionsEnabledDefaultsKey = "openClickyVoiceResponseCaptionsEnabled"
     static let userVoiceResponseCaptionFontDefaultsKey = "openClickyVoiceResponseCaptionFont"
     static let userVoiceResponseCaptionOpacityDefaultsKey = "openClickyVoiceResponseCaptionOpacity"
@@ -36,11 +24,7 @@ nonisolated enum AppBundleConfiguration {
     static let userAppLineSpacingDefaultsKey = "openClickyAppLineSpacing"
     static let userAppBoldTextDefaultsKey = "openClickyAppBoldTextEnabled"
     static let userCodexAgentAPIKeyDefaultsKey = "openClickyCodexAgentAPIKey"
-    static let userAssemblyAIAPIKeyDefaultsKey = "openClickyAssemblyAIAPIKey"
-    static let userDeepgramAPIKeyDefaultsKey = "openClickyDeepgramAPIKey"
     static let userVoiceTranscriptionProviderDefaultsKey = "openClickyVoiceTranscriptionProvider"
-    static let userVoiceActivationModeDefaultsKey = "openClickyVoiceActivationMode"
-    static let userCameraDeviceIDDefaultsKey = "openClickyCameraDeviceID"
     static let userAdvancedModeDefaultsKey = "openClickyAdvancedModeEnabled"
     static let userComputerUseBackendDefaultsKey = "openClickyComputerUseBackend"
     static let userNativeComputerUseDefaultsKey = "openClickyNativeComputerUseEnabled"
@@ -229,121 +213,6 @@ nonisolated enum AppBundleConfiguration {
         userDefaultsBool(forKey: userAgentCompletionVoiceEnabledDefaultsKey, defaultValue: true)
     }
 
-    static func assemblyAIAPIKey() -> String? {
-        userDefaultsValue(forKey: userAssemblyAIAPIKeyDefaultsKey) ?? stringValue(
-            forKey: "AssemblyAIAPIKey",
-            environmentKeys: ["ASSEMBLYAI_API_KEY", "ASSEMBLY_AI_API_KEY"]
-        ) ?? localDevelopmentEnvironmentValue(forKey: "ASSEMBLYAI_API_KEY")
-            ?? localDevelopmentEnvironmentValue(forKey: "ASSEMBLY_AI_API_KEY")
-    }
-
-    static func deepgramAPIKey() -> String? {
-        userDefaultsValue(forKey: userDeepgramAPIKeyDefaultsKey) ?? stringValue(
-            forKey: "DeepgramAPIKey",
-            environmentKeys: ["DEEPGRAM_API_KEY"]
-        ) ?? localDevelopmentEnvironmentValue(forKey: "DEEPGRAM_API_KEY")
-    }
-
-    static func elevenLabsAPIKey() -> String? {
-        userDefaultsValue(forKey: userElevenLabsAPIKeyDefaultsKey) ?? stringValue(
-            forKey: "ElevenLabsAPIKey",
-            environmentKeys: ["ELEVENLABS_API_KEY"]
-        ) ?? localDevelopmentEnvironmentValue(forKey: "ELEVENLABS_API_KEY")
-    }
-
-    static func elevenLabsVoiceID() -> String {
-        userDefaultsValue(forKey: userElevenLabsVoiceIDDefaultsKey) ?? stringValue(
-            forKey: "ElevenLabsVoiceID",
-            environmentKeys: ["ELEVENLABS_VOICE_ID"]
-        ) ?? localDevelopmentEnvironmentValue(forKey: "ELEVENLABS_VOICE_ID")
-        ?? "hpp4J3VqNfWAUOO0d1Us"
-    }
-
-    static func cartesiaAPIKey() -> String? {
-        userDefaultsValue(forKey: userCartesiaAPIKeyDefaultsKey) ?? stringValue(
-            forKey: "CartesiaAPIKey",
-            environmentKeys: ["CARTESIA_API_KEY"]
-        ) ?? localDevelopmentEnvironmentValue(forKey: "CARTESIA_API_KEY")
-    }
-
-    /// Cartesia voice ID. Defaults to one of their public neutral voices.
-    /// Users override via Settings → Voice → Cartesia voice ID.
-    static func cartesiaVoiceID() -> String {
-        userDefaultsValue(forKey: userCartesiaVoiceIDDefaultsKey) ?? stringValue(
-            forKey: "CartesiaVoiceID",
-            environmentKeys: ["CARTESIA_VOICE_ID"]
-        ) ?? localDevelopmentEnvironmentValue(forKey: "CARTESIA_VOICE_ID")
-        ?? "a0e99841-438c-4a64-b679-ae501e7d6091"
-    }
-
-    /// OpenAI Realtime output voice. Realtime supports the built-in voice
-    /// names directly; Settings stores the selected name here.
-    static func openAIRealtimeVoiceID() -> String {
-        userDefaultsValue(forKey: userOpenAIRealtimeVoiceIDDefaultsKey) ?? stringValue(
-            forKey: "OpenAIRealtimeVoiceID",
-            environmentKeys: ["OPENAI_REALTIME_VOICE_ID"]
-        ) ?? localDevelopmentEnvironmentValue(forKey: "OPENAI_REALTIME_VOICE_ID")
-        ?? "cedar"
-    }
-
-    /// Selected playback engine — "openai_realtime" (default), "elevenlabs",
-    /// "cartesia", "deepgram", or "microsoft_edge".
-    static func ttsProviderRaw() -> String {
-        userDefaultsValue(forKey: userTTSProviderDefaultsKey) ?? "openai_realtime"
-    }
-
-    /// Spoken replies are off at volume 0 (the default); no speech work runs then.
-    static var isVoicePlaybackEnabled: Bool { voicePlaybackVolume() > 0 }
-
-    static func voicePlaybackVolume() -> Double {
-        let defaults = UserDefaults.standard
-        guard defaults.object(forKey: openClickyVoicePlaybackVolumeDefaultsKey) != nil else {
-            return defaultVoicePlaybackVolume
-        }
-        let volume = defaults.double(forKey: openClickyVoicePlaybackVolumeDefaultsKey)
-        guard volume.isFinite else { return defaultVoicePlaybackVolume }
-        return min(max(volume, 0.0), 1.0)
-    }
-
-    /// Deepgram TTS voice/model identifier. Defaults to Aura 2 Thalia
-    /// (en). Verified against https://developers.deepgram.com (2026-04-26):
-    /// auth uses the same `Authorization: Token <key>` as STT, model
-    /// goes in `?model=` query param, output is PCM linear16 when
-    /// requested via `encoding=linear16&sample_rate=22050&container=none`.
-    static func deepgramTTSVoice() -> String {
-        userDefaultsValue(forKey: userDeepgramTTSVoiceDefaultsKey) ?? stringValue(
-            forKey: "DeepgramTTSVoice",
-            environmentKeys: ["DEEPGRAM_TTS_VOICE"]
-        ) ?? localDevelopmentEnvironmentValue(forKey: "DEEPGRAM_TTS_VOICE")
-        ?? "aura-2-thalia-en"
-    }
-
-    /// LLM model Deepgram Voice Agent should use for the think stage.
-    static func deepgramVoiceAgentThinkModel() -> String {
-        let rawModel = userDefaultsValue(forKey: userDeepgramVoiceAgentThinkModelDefaultsKey) ?? stringValue(
-            forKey: "DeepgramVoiceAgentThinkModel",
-            environmentKeys: ["DEEPGRAM_VOICE_AGENT_THINK_MODEL"]
-        ) ?? localDevelopmentEnvironmentValue(forKey: "DEEPGRAM_VOICE_AGENT_THINK_MODEL")
-        ?? "gpt-4o-mini"
-        return normalizeDeepgramVoiceAgentThinkModel(rawModel)
-    }
-
-    static func normalizeDeepgramVoiceAgentThinkModel(_ model: String) -> String {
-        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "gpt-4o-mini" : trimmed.lowercased()
-    }
-
-    /// Microsoft Edge Read Aloud voice identifier. These are the free
-    /// Edge online voices, not Azure Speech API keys.
-    static func microsoftEdgeVoiceID() -> String {
-        userDefaultsValue(forKey: userMicrosoftEdgeVoiceIDDefaultsKey) ?? stringValue(
-            forKey: "MicrosoftEdgeVoiceID",
-            environmentKeys: ["MICROSOFT_EDGE_VOICE_ID", "EDGE_TTS_VOICE"]
-        ) ?? localDevelopmentEnvironmentValue(forKey: "MICROSOFT_EDGE_VOICE_ID")
-            ?? localDevelopmentEnvironmentValue(forKey: "EDGE_TTS_VOICE")
-        ?? "en-US-EmmaMultilingualNeural"
-    }
-
     private static func userDefaultsBool(forKey key: String, defaultValue: Bool) -> Bool {
         guard UserDefaults.standard.object(forKey: key) != nil else { return defaultValue }
         return UserDefaults.standard.bool(forKey: key)
@@ -421,11 +290,7 @@ nonisolated enum AppBundleConfiguration {
 
     private static let keychainBackedDefaultsKeys: Set<String> = [
         userAnthropicAPIKeyDefaultsKey,
-        userElevenLabsAPIKeyDefaultsKey,
-        userCartesiaAPIKeyDefaultsKey,
         userCodexAgentAPIKeyDefaultsKey,
-        userAssemblyAIAPIKeyDefaultsKey,
-        userDeepgramAPIKeyDefaultsKey,
         userExternalControlBridgeTokenDefaultsKey
     ]
 

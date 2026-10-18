@@ -137,7 +137,7 @@ final class CodexHUDWindowManager: NSObject, NSWindowDelegate {
         glassBackdrop.configure(
             cornerRadius: OpenClickyHUDLayout.cornerRadius,
             roundsTopCorners: true,
-            accentColor: OpenClickyNotchCaptureWindowManager.nsAccentColor(for: nil),
+            accentColor: CompactInputWindowManager.nsAccentColor(for: nil),
             strength: .expanded
         )
         resizeContainer.addSubview(glassBackdrop)

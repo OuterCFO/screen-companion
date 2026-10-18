@@ -95,7 +95,6 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDel
     private static let sparkleFeedOverrideDefaultsKey = "OpenClickySparkleFeedURLOverride"
     private var menuBarPanelManager: MenuBarPanelManager?
     private let companionManager = CompanionManager()
-    private var sparkleUpdaterController: SPUStandardUpdaterController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("OpenClicky: Starting...")
@@ -184,36 +183,6 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDel
 
     func showLogViewerFromApplicationMenu() {
         companionManager.showLogViewerWindow()
-    }
-
-    /// Registers the app as a login item so it launches automatically on
-    /// startup. Uses SMAppService which shows the app in System Settings >
-    /// General > Login Items, letting the user toggle it off if they want.
-    private func registerAsLoginItemIfNeeded() {
-        let loginItemService = SMAppService.mainApp
-        if loginItemService.status != .enabled {
-            do {
-                try loginItemService.register()
-                print("OpenClicky: Registered as login item")
-            } catch {
-                print("OpenClicky: Failed to register as login item: \(error)")
-            }
-        }
-    }
-
-    private func startSparkleUpdater() {
-        let updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
-            updaterDelegate: self,
-            userDriverDelegate: self
-        )
-        self.sparkleUpdaterController = updaterController
-
-        if Self.sparkleFeedOverrideURLString() != nil {
-            DispatchQueue.main.async {
-                updaterController.updater.checkForUpdatesInBackground()
-            }
-        }
     }
 
     func feedURLString(for updater: SPUUpdater) -> String? {

@@ -68,9 +68,6 @@ final class CodexAnswerProvider: AnswerProvider {
         !CodexRuntimeLocator.codexExecutableCandidates(bundle: .main, fileManager: .default).isEmpty
     }
 
-    /// Realtime speech models stay on the realtime API; Codex serves text models only.
-    func supports(_ model: OpenClickyModelOption) -> Bool { !OpenClickyModelCatalog.isSpeechModelID(model.id) }
-
     func prepare(for model: OpenClickyModelOption) {
         session().model = Self.sessionModelID(for: model)
     }
@@ -101,8 +98,6 @@ final class OpenAIAPIAnswerProvider: AnswerProvider {
     init(api: @escaping () -> OpenAIAPI) { self.api = api }
 
     var isAvailable: Bool { AppBundleConfiguration.openAIAPIKey() != nil }
-
-    func supports(_ model: OpenClickyModelOption) -> Bool { !OpenClickyModelCatalog.isSpeechModelID(model.id) }
 
     func prepare(for model: OpenClickyModelOption) {
         let analysis = OpenClickyModelCatalog.voiceAnalysisModel(withID: model.id)
@@ -142,8 +137,6 @@ extension AnswerProviderRegistry {
         registry.register(.openAI, [codexProvider, OpenAIAPIAnswerProvider(api: openAIAPI)])
         registry.register(.codex, [codexProvider])
         registry.register(.apple, [AppleOnDeviceAnswerProvider()])
-        // Deepgram is a speech-to-speech agent, not a text answer provider.
-        registry.register(.deepgram, [])
         registry.register(.commandLine, [CommandLineAnswerProvider(configs: { CommandLineProviderConfig.load() })])
         return registry
     }

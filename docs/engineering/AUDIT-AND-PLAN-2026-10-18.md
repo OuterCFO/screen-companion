@@ -94,7 +94,7 @@ Checks per phase: source checks, the full-target typecheck, a native Xcode build
 2. Claude agents use the user's Claude Code settings, `auto` permission mode (`acceptEdits` in the browser sandbox), and resume their session on follow-ups.
 3. Done when: an agent task can be started on Claude Code or Codex from the same menu.
 
-### Phase 4: Slim down
+### Phase 4: Slim down (implemented 18 October; awaiting native build and live test)
 
 1. Remove the four unused areas listed under Decisions, separating the compact panel from the notch first.
 2. Done when: the app builds without them and the daily workflow is unchanged.

@@ -23,17 +23,17 @@ The product identity is OpenClicky:
 - Frameworks: SwiftUI, AppKit, AVFoundation, ScreenCaptureKit
 - Pattern: `@MainActor` state orchestration with observable SwiftUI views
 - Voice input: push-to-talk via a global CGEvent tap and pluggable transcription providers
-- Voice response: Claude through Anthropic API-key configuration
-- Text-to-speech: ElevenLabs through local key configuration
+- Answers: shown in the pointer bubble; spoken replies, realtime voice, wake word, and cloud speech services were removed in October 2026
+- Input: typed text, OpenSuperWhisper dictation, or built-in push-to-talk with Apple Speech or local Parakeet
 - Screen context: ScreenCaptureKit screenshots when the user invokes help
 - Agent Mode: bundled Codex runtime and OpenClicky resource pack in `AppResources/OpenClicky`
 
 ## Key Files
 
 - `cursor-buddy/cursor_buddyApp.swift`: app entry point and delegate hookup.
-- `cursor-buddy/CompanionManager.swift`: central app state machine for voice, screen capture, Claude, TTS, overlay, settings, and Agent Mode.
+- `cursor-buddy/CompanionManager.swift`: central app state machine for input, screen capture, answers, overlay, settings, and Agent Mode.
 - `cursor-buddy/MenuBarPanelManager.swift`: menu-bar item and floating panel lifecycle.
-- `cursor-buddy/CompanionPanelView.swift`: main OpenClicky panel and settings subscreen.
+- `cursor-buddy/CompactInputWindowManager.swift` and `MenuBarPromptWindowManager.swift`: the compact panel (input, tasks, History, Connect).
 - `cursor-buddy/OverlayWindow.swift`: cursor overlay, agent dock icons, captions, and response cards.
 - `cursor-buddy/CodexHUDWindowManager.swift`: Agent Mode dashboard window.
 - `cursor-buddy/CodexHomeManager.swift`: prepares the local Codex home using OpenClicky bundled resources.
@@ -46,7 +46,6 @@ The product identity is OpenClicky:
 OpenClicky should use local keys and user configuration. Do not add Google login or hosted key sync:
 
 - `ANTHROPIC_API_KEY` for Claude responses
-- `ELEVENLABS_API_KEY` for ElevenLabs TTS
 - `OPENAI_API_KEY` for Codex/Agent Mode where needed
 
 Do not introduce a hard dependency on a Cloudflare Worker for the final app.
@@ -55,8 +54,8 @@ Do not introduce a hard dependency on a Cloudflare Worker for the final app.
 
 Two independent layers — keep them straight:
 
-1. **Provider selection (driven by Settings + bubble/notch selector).** Every model in `OpenClickyModelCatalog` carries a `provider` (`.apple` / `.anthropic` / `.openAI` / `.codex` / `.deepgram` / `.commandLine`). Text answers and Anthropic pointing go through `AnswerProviderRegistry` (`AnswerProvider.swift`, `AnswerProviders.swift`), which maps each family to an ordered provider chain; do not add new `switch` statements on the provider. Connect goes through `SessionLink` sources (`SessionLink.swift`). Agent tasks on Claude models run through `ClaudeCodeAgentEvents.swift` inside `CodexAgentSession`; Codex config only ever receives Codex models. See `docs/PROVIDERS.md`.
-   Coarse family chips (Apple / Codex / Claude) live on the response bubble and notch via `OpenClickyVoiceBackendSelector` + `OpenClickyProviderDiscovery` (auto-detect installed CLI / on-device availability — do not package runtimes).
+1. **Provider selection (driven by Settings + bubble selector).** Every model in `OpenClickyModelCatalog` carries a `provider` (`.apple` / `.anthropic` / `.openAI` / `.codex` / `.deepgram` / `.commandLine`). Text answers and Anthropic pointing go through `AnswerProviderRegistry` (`AnswerProvider.swift`, `AnswerProviders.swift`), which maps each family to an ordered provider chain; do not add new `switch` statements on the provider. Connect goes through `SessionLink` sources (`SessionLink.swift`). Agent tasks on Claude models run through `ClaudeCodeAgentEvents.swift` inside `CodexAgentSession`; Codex config only ever receives Codex models. See `docs/PROVIDERS.md`.
+   Coarse family chips (Apple / Codex / Claude) live on the response bubble via `OpenClickyVoiceBackendSelector` + `OpenClickyProviderDiscovery` (auto-detect installed CLI / on-device availability — do not package runtimes).
 2. **Within-provider ordering (money rule).** For the Claude branch, the Claude Code CLI is the PRIMARY path because it uses the local Claude Code sign-in already paid for. Direct `ClaudeAPI` HTTP is FALLBACK ONLY (CLI missing or throws); `AnswerProviderRegistry.register` rejects chains that put a per-token provider first. Never short-circuit to direct REST for latency or capability reasons — direct REST bills per token. The OpenAI/Codex branch follows the same shape: Codex app server first, OpenAI key fallback. Apple is always free/local. EXEMPTION: realtime speech models (`gpt-realtime-2.1-mini` default, `gpt-realtime-2.1`, `gpt-realtime-1.5`; legacy `gpt-realtime-2` aliases to mini) use the direct Realtime API path only.
 
 Do not delete `ClaudeAPI.swift` or the HTTP path — it is the deliberate fallback. Before editing any Claude/OpenAI call site, confirm the order is CLI/app-server -> key fallback. See `docs/CLAUDE-CODE.md`.

@@ -21,7 +21,8 @@ It is independent of the commercial Clicky product and of OpenAI.
 - Answers appear beside the moving AI pointer, with optional screen highlights.
 - **Escape or ×** dismisses answers and highlights without deleting history.
 - No persistent fake-notch pill or side cursor dock.
-- The default response model is `gpt-6-luna` with medium reasoning effort through Codex, playback is muted, and idle observation is off.
+- Answers appear in the pointer bubble rather than being spoken, and idle observation is off.
+- Answers can run on Claude Code, Codex, Apple On-Device, or any command-line tool you configure; see [AI providers](docs/PROVIDERS.md).
 
 The interface runs locally; AI inference on the default route runs remotely through your ChatGPT-backed Codex account.
 No local LLM is required.

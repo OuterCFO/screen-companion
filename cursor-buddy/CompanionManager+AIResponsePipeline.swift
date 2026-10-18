@@ -32,15 +32,7 @@ extension CompanionManager {
         interruptCurrentVoiceResponse()
         beginCursorReplyPresentation()
         let timing = activeRequestTiming
-        let plannedVoiceAnalysisModelID: String? = {
-            let selectedVoiceResponseModel = OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel)
-            guard OpenClickyModelCatalog.isSpeechModelID(selectedVoiceResponseModel.id),
-                  Self.shouldAttachScreenContext(to: transcript) else {
-                return nil
-            }
-            return OpenClickyModelCatalog.voiceAnalysisModel(withID: selectedVoiceResponseModel.id).id
-        }()
-        var executionFields = voiceResponseExecutionFields(effectiveModelID: plannedVoiceAnalysisModelID)
+        var executionFields = voiceResponseExecutionFields()
         executionFields["transcriptLength"] = transcript.count
         let executionStartedAt = markRequestExecutionStarted(
             route: "voice.response",
@@ -55,7 +47,7 @@ extension CompanionManager {
         currentVoiceResponseCancellationHandler = { [weak self] reason in
             guard let self, !completionState.didComplete else { return }
             completionState.didComplete = true
-            var completionFields = self.voiceResponseExecutionFields(effectiveModelID: plannedVoiceAnalysisModelID)
+            var completionFields = self.voiceResponseExecutionFields()
             completionFields["cancelledAt"] = reason
             completionFields["audioPlaybackState"] = "interrupted"
             self.markRequestCompleted(
@@ -89,7 +81,7 @@ extension CompanionManager {
                         self.currentVoiceResponseCompletionToken = nil
                     }
                     self.scheduleVoiceResponseCaptionClear()
-                    var completionFields = self.voiceResponseExecutionFields(effectiveModelID: plannedVoiceAnalysisModelID)
+                    var completionFields = self.voiceResponseExecutionFields()
                     extra.forEach { completionFields[$0.key] = $0.value }
                     self.markRequestCompleted(
                         route: "voice.response",
@@ -177,128 +169,11 @@ extension CompanionManager {
                 }
 
                 let hasVisualContext = !labeledImages.isEmpty
-                let isRealtimeResponseModel = OpenClickyModelCatalog.isSpeechModelID(self.selectedModel)
-                let visualAnalysisModelID = isRealtimeResponseModel && hasVisualContext
-                    ? OpenClickyModelCatalog.voiceAnalysisModel(withID: self.selectedModel).id
-                    : self.selectedModel
-
-                // Realtime speech turns are audio-first. They do not currently
-                // carry OpenClicky's screenshot payload into the response model,
-                // so visual requests must continue through the screenshot-aware
-                // voice path below. The playback engine can still be Realtime.
-                if isRealtimeResponseModel && !hasVisualContext {
-                    let realtimeStartedAt = Date()
-                    var didMarkRealtimeAudioStarted = false
-                    let realtimeText = try await self.openAIRealtimeSpeechClient.speakResponse(
-                        systemPrompt: currentRealtimeVoiceSystemPrompt(),
-                        conversationHistory: historyForAPI,
-                        userPrompt: userPromptForClaude,
-                        onTextChunk: { accumulatedText in
-                            let trimmed = accumulatedText.trimmingCharacters(in: .whitespacesAndNewlines)
-                            guard !trimmed.isEmpty else { return }
-                            self.latestVoiceResponseCard = ClickyResponseCard(
-                                source: .voice,
-                                rawText: trimmed,
-                                contextTitle: transcript
-                            )
-                            self.updateVoiceResponseCaption(trimmed)
-                        },
-                        onPlaybackStarted: {
-                            guard !didMarkRealtimeAudioStarted else { return }
-                            didMarkRealtimeAudioStarted = true
-                            self.voiceState = .responding
-                            self.markRequestStageCompleted(
-                                route: "voice.response",
-                                stage: "tts_audio_started",
-                                stageStartedAt: realtimeStartedAt,
-                                timing: timing,
-                                extra: [
-                                    "executor": "realtime_voice",
-                                    "executionMethod": "OpenAIRealtimeSpeechClient.speakResponse",
-                                    "controller": "OpenAIRealtimeSpeechClient",
-                                    "speechModel": self.selectedModel,
-                                    "speechVoice": self.openAIRealtimeSpeechClient.voiceID
-                                ]
-                            )
-                        }
-                    )
-                    let spokenText = realtimeText.isEmpty ? "Done." : realtimeText
-                    self.markRequestStageCompleted(
-                        route: "voice.response",
-                        stage: "model_response",
-                        stageStartedAt: realtimeStartedAt,
-                        timing: timing,
-                        extra: {
-                            var fields = self.voiceResponseExecutionFields()
-                            fields["responseLength"] = spokenText.count
-                            fields["imageCount"] = labeledImages.count
-                            fields["realtimeResponseModelOverride"] = true
-                            return fields
-                        }()
-                    )
-
-                    self.rememberVoiceExchange(
-                        userTranscript: transcript,
-                        assistantResponse: spokenText,
-                        reason: "realtime_response"
-                    )
-                    do {
-                        try codexHomeManager.appendPersistentMemoryEvent(
-                            userRequest: transcript,
-                            agentResponse: spokenText
-                        )
-                    } catch {
-                        print("⚠️ OpenClicky memory update failed: \(error)")
-                    }
-                    ClickyAnalytics.trackAIResponseReceived(response: spokenText)
-                    self.latestVoiceResponseCard = ClickyResponseCard(
-                        source: .voice,
-                        rawText: spokenText,
-                        contextTitle: transcript
-                    )
-                    self.updateVoiceResponseCaption(spokenText)
-                    self.scheduleStatusSync()
-                    self.pendingAgentOfferInstruction = nil
-                    self.pendingAgentOfferAt = nil
-                    await completeRequest(extra: [
-                        "audioPlaybackState": "finished",
-                        "realtimeResponseModelOverride": true
-                    ])
-                    return
-                }
-
-                // Only use a pre-response filler when it is buying real
-                // latency cover. For text-only Haiku turns the logs show
-                // first audio is already ~1s away, and prepended phrases
-                // sound unnatural on short replies ("one moment. sounds
-                // good..."). Screen/visual turns still benefit from a
-                // neutral filler while capture + vision processing happens.
-                let shouldUseFiller = Self.shouldUsePreResponseFiller(
-                    transcript: transcript,
-                    screenContextNeeded: hasVisualContext,
-                    modelProvider: OpenClickyModelCatalog.voiceResponseModel(withID: visualAnalysisModelID).provider,
-                    ttsProvider: self.selectedTTSProvider
-                )
-                let speaksReply = AppBundleConfiguration.isVoicePlaybackEnabled
-                let chosenFiller = shouldUseFiller && speaksReply
-                    ? FillerPhraseLibrary.shared.contextualFiller(
-                        for: transcript,
-                        screenContextNeeded: hasVisualContext
-                    )
-                    : nil
-                let voiceSystemPrompt: String = {
-                    let base = currentVoiceResponseSystemPrompt()
-                        + (routesAgentWork ? "" : "\n\n" + ScreenTutorRoutingPolicy.noAutomaticAgentNote)
-                    guard let chosenFiller else { return base }
-                    return base + """
+                let visualAnalysisModelID = self.selectedModel
 
 
-                    OPENER ALREADY SPOKEN:
-                    The user has already heard you say: "\(chosenFiller.phrase)" — that audio plays the instant they release the push-to-talk key, before you have produced a single token. Your reply will be appended directly after it, so write a NATURAL CONTINUATION:
-                    - Do NOT repeat or paraphrase the opener (no "one moment", "give me a second", "let me check", "take a look", "that makes sense", "working on it", "checking now", "okay", "alright", "got it", "let's see").
-                    - Start with the substance, not a greeting. The first words you generate should be the next words the user hears after the opener.
-                    """
-                }()
+                let voiceSystemPrompt = currentVoiceResponseSystemPrompt()
+                    + (routesAgentWork ? "" : "\n\n" + ScreenTutorRoutingPolicy.noAutomaticAgentNote)
 
                 let modelStartedAt = Date()
                 var modelResponseFields = self.voiceResponseExecutionFields(
@@ -308,89 +183,16 @@ extension CompanionManager {
                     modelResponseFields["visualAnalysisModel"] = visualAnalysisModelID
                     modelResponseFields["realtimeVisualPathOverride"] = true
                 }
-                let ttsStartedAt = Date()
-                var didMarkAudioStarted = false
-
-                // Open a sentence-pipelined TTS session BEFORE the LLM
-                // call starts. As tokens arrive, we push deltas to the
-                // session, which fires per-sentence TTS requests in
-                // parallel and plays them in order. First audio reaches
-                // the speaker as soon as the FIRST sentence completes,
-                // not after the whole response.
-                // Muted replies skip speech entirely, so no audio engine or provider request starts.
-                let streamingTTSSession: StreamingTTSSession? = !speaksReply ? nil : self.voiceTTSClient.beginStreamingResponse {
-                    guard !didMarkAudioStarted else { return }
-                    didMarkAudioStarted = true
-                    self.voiceState = .responding
-                    self.markRequestStageCompleted(
-                        route: "voice.response",
-                        stage: "tts_audio_started",
-                        stageStartedAt: ttsStartedAt,
-                        timing: timing,
-                        extra: [
-                            "executor": "tts",
-                            "executionMethod": self.activeTTSExecutionMethodBeginStreaming,
-                            "controller": self.activeTTSControllerName,
-                            "preResponseFillerUsed": chosenFiller != nil,
-                            "preResponseFillerPhrase": chosenFiller?.phrase ?? "",
-                            "preResponseFillerDelayMs": chosenFiller == nil
-                                ? 0
-                                : StreamingTTSSession.preResponseFillerDelayMilliseconds
-                        ]
-                    )
-                }
-
-                // Schedule the pre-baked filler after a short natural
-                // thinking beat. The first LLM sentence enqueues behind
-                // it via the chain ordering, so the user hears the filler
-                // at roughly 300-500ms, then the substantive continuation.
-                // The system prompt was already augmented above with the
-                // exact text of this filler so Haiku's reply continues
-                // from it instead of restarting.
-                if let chosenFiller {
-                    streamingTTSSession?.enqueuePrebakedSamples(chosenFiller.samples)
-                }
-
-                // Track the cumulative spoken text we've already pushed
-                // into the TTS pipeline. We only emit a delta when the
-                // newly-parsed safe-spoken text strictly extends what
-                // we've emitted — never re-emit, never speak retracted
-                // text (e.g. when a `[POINT:...]` tag completes mid-
-                // stream and the parser strips it).
-                var emittedSpokenSoFar = ""
-                // Throttle the response-card publish so we don't re-render
-                // SwiftUI on every LLM token (which can be 10+ per second).
-                // Each publish hits the main actor, contending with the
-                // cursor-tracking timer and audio scheduler. 100ms cadence
-                // is plenty for visible "live caption" feedback.
                 var didDispatchStreamingPoint = false
                 var lastCardPublishedAt: Date = .distantPast
                 let cardPublishInterval: TimeInterval = 0.1
-                // Build the assistant prefill so Haiku's reply continues
-                // from the spoken filler at the autoregressive level
-                // (Anthropic-only; OpenAI/Codex paths fall back to the
-                // system-prompt directive). We keep the prefill trimmed
-                // for Anthropic's assistant-prefix rules, then rejoin it
-                // with the continuation when building local display text.
-                //
-                // The streamed `accumulatedText` we get back from the
-                // Claude API path is ONLY the continuation; the prefill
-                // is not echoed. That matches our pipeline exactly: the
-                // filler is already playing from the pre-baked PCM, so
-                // we only want to push the continuation through the
-                // sentence-streaming TTS. The prefill text is folded
-                // back into `fullResponseText` AFTER streaming so logs
-                // and conversation history record the complete utterance.
-                let assistantPrefillText: String? = chosenFiller.map {
-                    $0.phrase.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                let continuationText = try await analyzeVoiceResponse(
+                let fullResponseText = try await analyzeVoiceResponse(
                     images: labeledImages,
                     modelID: visualAnalysisModelID,
                     systemPrompt: voiceSystemPrompt,
                     conversationHistory: historyForAPI,
                     userPrompt: userPromptForClaude,
-                    assistantPrefill: assistantPrefillText,
+                    assistantPrefill: nil,
                     onTextChunk: { accumulatedText in
                         let streamed = Self.parsePointingCoordinates(from: accumulatedText)
                         if !Task.isCancelled, !didDispatchStreamingPoint, let point = streamed.coordinate {
@@ -413,19 +215,7 @@ extension CompanionManager {
                             let now = Date()
                             if now.timeIntervalSince(lastCardPublishedAt) >= cardPublishInterval {
                                 lastCardPublishedAt = now
-                                // Prepend the filler text so the card
-                                // matches what the user actually hears
-                                // (cached filler PCM plays before the
-                                // continuation).
-                                let displayed: String
-                                if let prefill = assistantPrefillText {
-                                    displayed = Self.combinedVoiceResponseText(
-                                        prefill: prefill,
-                                        continuation: trimmed
-                                    )
-                                } else {
-                                    displayed = trimmed
-                                }
+                                let displayed = trimmed
                                 self.latestVoiceResponseCard = ClickyResponseCard(
                                     source: .voice,
                                     rawText: displayed,
@@ -434,34 +224,8 @@ extension CompanionManager {
                                 self.updateVoiceResponseCaption(displayed)
                             }
                         }
-
-                        // Strip a trailing partial visual-guidance tag so we
-                        // never push "[POI", "[RECT", or "[SCRIBBLE" into TTS.
-                        let safeSpoken = Self.stripTrailingVisualGuidanceTagFragment(parsedSpoken)
-
-                        guard safeSpoken.hasPrefix(emittedSpokenSoFar),
-                              safeSpoken.count > emittedSpokenSoFar.count else {
-                            return
-                        }
-                        let delta = String(safeSpoken.dropFirst(emittedSpokenSoFar.count))
-                        emittedSpokenSoFar = safeSpoken
-                        streamingTTSSession?.appendText(delta)
                     }
                 )
-                // Reassemble the full utterance: filler text (already
-                // spoken from cached PCM) + Claude's continuation.
-                // Used for [POINT:...] parsing, conversation history,
-                // and logging. Without this, the next turn's history
-                // would be missing the opener and Claude would drift.
-                let fullResponseText: String = {
-                    if let prefill = assistantPrefillText, !prefill.isEmpty {
-                        return Self.combinedVoiceResponseText(
-                            prefill: prefill,
-                            continuation: continuationText
-                        )
-                    }
-                    return continuationText
-                }()
                 self.markRequestStageCompleted(
                     route: "voice.response",
                     stage: "model_response",
@@ -470,12 +234,6 @@ extension CompanionManager {
                     extra: {
                         modelResponseFields["responseLength"] = fullResponseText.count
                         modelResponseFields["imageCount"] = labeledImages.count
-                        modelResponseFields["assistantPrefillUsed"] = assistantPrefillText != nil
-                        modelResponseFields["preResponseFillerUsed"] = chosenFiller != nil
-                        modelResponseFields["preResponseFillerPhrase"] = chosenFiller?.phrase ?? ""
-                        modelResponseFields["preResponseFillerDelayMs"] = chosenFiller == nil
-                            ? 0
-                            : StreamingTTSSession.preResponseFillerDelayMilliseconds
                         return modelResponseFields
                     }()
                 )
@@ -494,7 +252,6 @@ extension CompanionManager {
                     transcript: transcript,
                     source: "voice_response"
                 ) {
-                    streamingTTSSession?.cancel()
                     await completeRequest(
                         status: "cancelled",
                         extra: [
@@ -657,136 +414,17 @@ extension CompanionManager {
                     self.pendingAgentOfferAt = nil
                 }
 
-                // The streaming TTS session has already been speaking
-                // sentences as the LLM generated them. We just need to
-                // flush whatever's left in the pending buffer (e.g. a
-                // tail with no sentence terminator) and wait for the
-                // last sentence to finish playing before marking the
-                // request done.
-                if !spokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    // Sync the session's view of "what was spoken" to the
-                    // final parsed text. If the parser stripped a POINT
-                    // tag at the end, our streaming-time emit may have
-                    // stopped a few characters short — push the remainder
-                    // here so finish() flushes the full sentence.
-                    //
-                    // `emittedSpokenSoFar` only contains the LLM
-                    // continuation (the filler is enqueued separately
-                    // as pre-baked PCM and never goes through
-                    // streamingTTSSession.appendText), so we compare
-                    // against the continuation portion of spokenText —
-                    // i.e. spokenText with the prefill prefix stripped.
-                    let continuationSpoken: String
-                    if assistantPrefillText != nil {
-                        continuationSpoken = Self.parsePointingCoordinates(from: continuationText).spokenText
-                    } else {
-                        continuationSpoken = spokenText
-                    }
-                    if continuationSpoken.hasPrefix(emittedSpokenSoFar),
-                       continuationSpoken.count > emittedSpokenSoFar.count {
-                        let tailDelta = String(continuationSpoken.dropFirst(emittedSpokenSoFar.count))
-                        emittedSpokenSoFar = continuationSpoken
-                        streamingTTSSession?.appendText(tailDelta)
-                    }
-
-                    do {
-                        try await streamingTTSSession?.finish()
-                        guard !Task.isCancelled else {
-                            await completeRequest(
-                                status: "cancelled",
-                                extra: [
-                                    "cancelledAt": "after_tts_finish",
-                                    "spokenTextLength": spokenText.count,
-                                    "pointed": parseResult.coordinate != nil,
-                                    "audioPlaybackState": Self.voiceResponseCompletionAudioPlaybackState(
-                                        spokenText: spokenText,
-                                        playbackFinished: false
-                                    )
-                                ]
-                            )
-                            return
-                        }
-                        self.markRequestStageCompleted(
-                            route: "voice.response",
-                            stage: "tts_playback_finished",
-                            stageStartedAt: ttsStartedAt,
-                            timing: timing,
-                            extra: [
-                                "executor": "tts",
-                                "executionMethod": "StreamingTTSSession.finish",
-                                "controller": self.activeTTSControllerName,
-                                "spokenTextLength": spokenText.count
-                            ]
-                        )
-                    } catch {
-                        guard !Self.isExpectedCancellation(error) else {
-                            await completeRequest(
-                                status: "cancelled",
-                                extra: [
-                                    "cancelledAt": "tts",
-                                    "spokenTextLength": spokenText.count,
-                                    "pointed": parseResult.coordinate != nil,
-                                    "audioPlaybackState": Self.voiceResponseCompletionAudioPlaybackState(
-                                        spokenText: spokenText,
-                                        playbackFinished: false
-                                    )
-                                ]
-                            )
-                            return
-                        }
-                        ClickyAnalytics.trackTTSError(error: error.localizedDescription)
-                        print("⚠️ ElevenLabs streaming TTS error: \(error)")
-                        speakResponseFailureFallback(error)
-                        self.markRequestStageCompleted(
-                            route: "voice.response",
-                            stage: didMarkAudioStarted ? "tts_playback_finished" : "tts_audio_started",
-                            stageStartedAt: ttsStartedAt,
-                            timing: timing,
-                            status: "failed",
-                            extra: [
-                                "executor": "tts",
-                                "executionMethod": "StreamingTTSSession.finish",
-                                "controller": self.activeTTSControllerName,
-                                "error": error.localizedDescription
-                            ]
-                        )
-                    }
-                } else {
-                    // No spoken text — discard the streaming session so
-                    // its engine tears down cleanly.
-                    streamingTTSSession?.cancel()
-                }
                 var completionFields = self.voiceResponseExecutionFields(
                     effectiveModelID: visualAnalysisModelID == self.selectedModel ? nil : visualAnalysisModelID
                 )
                 completionFields["spokenTextLength"] = spokenText.count
                 completionFields["pointed"] = parseResult.coordinate != nil
-                let audioPlaybackState = Self.voiceResponseCompletionAudioPlaybackState(
-                    spokenText: spokenText,
-                    playbackFinished: true,
-                    audioStarted: didMarkAudioStarted
+                self.latestVoiceResponseCard = ClickyResponseCard(
+                    source: .voice,
+                    rawText: spokenText,
+                    contextTitle: transcript
                 )
-                completionFields["audioPlaybackState"] = audioPlaybackState
-                if audioPlaybackState == "never_started" {
-                    // Muted replies never start audio by design; only report real playback failures.
-                    if speaksReply { OpenClickyMessageLogStore.shared.append(
-                        lane: "voice",
-                        direction: "internal",
-                        event: "voice.response.audio_never_started",
-                        fields: [
-                            "transcript": transcript,
-                            "spokenTextLength": spokenText.count,
-                            "controller": self.activeTTSControllerName,
-                            "requestID": timing?.requestID ?? "none"
-                        ]
-                    ) }
-                    self.latestVoiceResponseCard = ClickyResponseCard(
-                        source: .voice,
-                        rawText: spokenText,
-                        contextTitle: transcript
-                    )
-                    self.updateVoiceResponseCaption(spokenText, force: true)
-                }
+                self.updateVoiceResponseCaption(spokenText, force: true)
                 await completeRequest(extra: completionFields)
             } catch is CancellationError {
                 // User spoke again — response was interrupted
@@ -844,7 +482,6 @@ extension CompanionManager {
                 guard let self,
                       self.isTutorModeEnabled,
                       self.voiceState == .idle,
-                      !self.voiceTTSClient.isPlaying,
                       !self.isTutorObservationInFlight,
                       Date().timeIntervalSince(self.lastVoiceInteractionCompletedAt) >= Self.tutorObservationVoiceCooldown else { return }
 
@@ -910,13 +547,6 @@ extension CompanionManager {
                 assistantResponse: spokenText,
                 reason: "tutor_observation"
             )
-
-            if AppBundleConfiguration.isVoicePlaybackEnabled,
-               !spokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                try await voiceTTSClient.speakText(spokenText) {
-                    self.voiceState = .responding
-                }
-            }
         } catch is CancellationError {
             // A normal voice interaction interrupted the tutor observation.
         } catch where Self.isExpectedCancellation(error) {
@@ -1065,81 +695,12 @@ extension CompanionManager {
         }
         let responseSystemPrompt = systemPrompt + "\n\n" + CursorResponseContract.instructions
         let requestedModelID = modelID ?? selectedModel
-        let selectedVoiceResponseModel = OpenClickyModelCatalog.isSpeechModelID(requestedModelID)
-            ? OpenClickyModelCatalog.voiceAnalysisModel(withID: requestedModelID)
-            : OpenClickyModelCatalog.voiceResponseModel(withID: requestedModelID)
-        guard selectedVoiceResponseModel.provider != .deepgram else {
-            throw NSError(
-                domain: "DeepgramVoiceAgentClient",
-                code: -20,
-                userInfo: [NSLocalizedDescriptionKey: "Deepgram Voice Agent handles live microphone turns directly; text/screenshot fallback should route through a normal response model."]
-            )
-        }
+        let selectedVoiceResponseModel = OpenClickyModelCatalog.voiceResponseModel(withID: requestedModelID)
         return try await answerProviders.answer(AnswerRequest(
             model: selectedVoiceResponseModel, images: images, systemPrompt: responseSystemPrompt,
             history: conversationHistory, prompt: userPrompt,
             assistantPrefill: nil // Mandatory point-first format forbids a prose prefill.
         ), onText: onTextChunk)
-    }
-
-    private static func shouldUsePreResponseFiller(
-        transcript: String,
-        screenContextNeeded: Bool,
-        modelProvider: OpenClickyModelProvider,
-        ttsProvider: OpenClickyTTSProvider
-    ) -> Bool {
-        let commandText = SpokenText.normalizedSpokenCommandText(transcript)
-        let wordCount = commandText.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).count
-
-        // Never prepend filler to acknowledgements, corrections, or very
-        // short replies. These are exactly the cases where the filler
-        // sounds like Clicky is inventing work: "one moment. sounds good."
-        if wordCount <= 4 { return false }
-        let acknowledgementPhrases: Set<String> = [
-            "yes", "yeah", "yep", "no", "nope", "ok", "okay",
-            "alright", "all right", "sounds good", "thanks", "thank you",
-            "continue", "go on", "stop", "cancel", "nevermind", "never mind"
-        ]
-        if acknowledgementPhrases.contains(commandText) { return false }
-
-        // Do not put spoken filler in front of direct control commands.
-        // Those turns should either execute immediately or produce a
-        // concrete handoff/status, not "yeah, that makes sense."
-        let directActionPrefixes = [
-            "open ", "play ", "pause ", "click ", "press ", "type ",
-            "select ", "scroll ", "switch ", "bring ", "move ",
-            "close ", "quit ", "launch "
-        ]
-        if directActionPrefixes.contains(where: commandText.hasPrefix) {
-            return false
-        }
-
-        // Speech-to-speech Realtime already provides its own immediate
-        // audio path; adding cached TTS filler would create a double voice.
-        if ttsProvider == .openAIRealtime {
-            return false
-        }
-
-        // Deepgram Voice Agent owns the whole voice turn when selected as
-        // the response model. If this path is reached for analysis only,
-        // keep fillers off to avoid cross-provider audio seams.
-        if modelProvider == .deepgram {
-            return false
-        }
-
-        if screenContextNeeded {
-            return true
-        }
-
-        // For Cartesia/ElevenLabs/Edge/Deepgram-TTS text turns, use a
-        // cached opener only when the user has asked a real multi-word
-        // question or investigation. Short acknowledgements stay crisp.
-        switch ttsProvider {
-        case .cartesia, .elevenLabs, .microsoftEdge, .deepgram:
-            return wordCount >= 6
-        case .openAIRealtime:
-            return false
-        }
     }
 
     private static let visualFollowUpHistoryDepth = 3
@@ -1315,15 +876,6 @@ extension CompanionManager {
         )
 
         switch resolver {
-        case .openAIRealtime:
-            let text = try await openAIRealtimeSpeechClient.analyzeImageResponse(
-                images: [image],
-                modelID: selectedPointingModel.id,
-                systemPrompt: systemPrompt,
-                userPrompt: userPrompt,
-                onTextChunk: onTextChunk
-            )
-            return text
         case .anthropicAPI:
             return try await answerProviders.answer(AnswerRequest(
                 model: selectedPointingModel, images: [image], systemPrompt: systemPrompt,
@@ -1364,10 +916,6 @@ extension CompanionManager {
         selectedComputerUseModelID: String
     ) -> OpenClickyComputerUsePointingResolver {
         let pointingModel = OpenClickyModelCatalog.computerUseModel(withID: selectedComputerUseModelID)
-        if pointingModel.provider == .openAI,
-           OpenClickyModelCatalog.isSpeechModelID(pointingModel.id) {
-            return .openAIRealtime
-        }
 
         switch pointingModel.provider {
         case .anthropic:
@@ -1376,7 +924,7 @@ extension CompanionManager {
             return .codexCLI
         case .openAI:
             return .openAIResponses
-        case .apple, .deepgram, .commandLine:
+        case .apple, .commandLine:
             return .unsupported
         }
     }
@@ -1420,7 +968,7 @@ extension CompanionManager {
                 displayWidthInPoints: targetScreenCapture.displayWidthInPoints,
                 displayHeightInPoints: targetScreenCapture.displayHeightInPoints
             )
-        case .apple, .openAI, .deepgram, .commandLine:
+        case .apple, .openAI, .commandLine:
             return
         }
 
@@ -1545,12 +1093,6 @@ extension CompanionManager {
 
         transientHideTask?.cancel()
         transientHideTask = Task {
-            // Wait for TTS audio to finish playing
-            while voiceTTSClient.isPlaying {
-                try? await Task.sleep(nanoseconds: 200_000_000)
-                guard !Task.isCancelled else { return }
-            }
-
             // Wait for pointing animation to finish (location is cleared
             // when the buddy flies back to the cursor)
             while detectedElementScreenLocation != nil {
@@ -1584,7 +1126,6 @@ extension CompanionManager {
             "error": error.localizedDescription,
             "message": message
         ]
-        fields.merge(ttsFailureDiagnosticFields(for: error), uniquingKeysWith: { _, new in new })
         OpenClickyMessageLogStore.shared.append(
             lane: "voice",
             direction: "incoming",
@@ -1631,13 +1172,6 @@ extension CompanionManager {
                 return "Anthropic is not configured. Set the Anthropic API key and relaunch."
             }
             return "Claude returned an error. Check the app log for the exact response."
-        case "ElevenLabsTTS":
-            return "Voice playback failed, but the Claude response completed. Check the app log for the TTS error."
-        case "DeepgramTTS":
-            if nsError.code == Self.deepgramNotConfiguredErrorCode {
-                return "Deepgram is not configured. Add a Deepgram API key in Settings."
-            }
-            return "Deepgram voice playback failed. Check the app log for the TTS error."
         case "CompanionScreenCapture":
             return "Screen capture failed. Grant Screen Recording to this exact app, then quit and reopen."
         default:
@@ -1645,31 +1179,4 @@ extension CompanionManager {
         }
     }
 
-    private func ttsFailureDiagnosticFields(for error: Error) -> [String: Any] {
-        let nsError = error as NSError
-        var fields: [String: Any] = [
-            "ttsProvider": selectedTTSProvider.rawValue
-        ]
-
-        if selectedTTSProvider == .deepgram || nsError.domain == "DeepgramTTS" {
-            let currentSnapshot = DeepgramTTSConfigurationSnapshot.current()
-            fields["deepgramKeyConfigured"] = currentSnapshot.hasAPIKey
-            fields["deepgramVoiceID"] = currentSnapshot.voiceID
-            fields["deepgramSnapshotMatchesClient"] = (cachedDeepgramTTSSnapshot == currentSnapshot)
-
-            if nsError.domain == "DeepgramTTS", nsError.code == Self.deepgramNotConfiguredErrorCode {
-                fields["ttsFailureKind"] = currentSnapshot.hasAPIKey ? "stale_client" : "missing_key"
-            } else if nsError.domain == "DeepgramTTS" {
-                fields["ttsFailureKind"] = "playback_failure"
-            } else {
-                fields["ttsFailureKind"] = "unknown"
-            }
-            return fields
-        }
-
-        if nsError.domain == "ElevenLabsTTS" || nsError.domain == "CartesiaTTS" {
-            fields["ttsFailureKind"] = "playback_failure"
-        }
-        return fields
-    }
 }

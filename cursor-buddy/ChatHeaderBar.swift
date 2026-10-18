@@ -19,7 +19,6 @@ struct ChatHeaderBar: View {
   @AppStorage(AppBundleConfiguration.userAppFontDefaultsKey) private var appFontRawValue = OpenClickyResponseCaptionFont.fallback.rawValue
   @AppStorage(AppBundleConfiguration.userAppBoldTextDefaultsKey) private var appBoldTextEnabled = false
   @AppStorage(AppBundleConfiguration.userAppTitleFontSizeDefaultsKey) private var appTitleFontSize = 26.0
-  @AppStorage(AppBundleConfiguration.userAppBodyFontSizeDefaultsKey) private var appBodyFontSize = 13.0
   @AppStorage(AppBundleConfiguration.userAppSubtextFontSizeDefaultsKey) private var appSubtextFontSize = 11.0
 
   // OpenClicky panel palette.
@@ -32,7 +31,6 @@ struct ChatHeaderBar: View {
   }
 
   private var titleFontSize: CGFloat { CGFloat(appTitleFontSize) }
-  private var bodyFontSize: CGFloat { CGFloat(appBodyFontSize) }
   private var subtextFontSize: CGFloat { CGFloat(appSubtextFontSize) }
 
   private func appUIFont(size: CGFloat, weight: Font.Weight = .medium) -> Font {
