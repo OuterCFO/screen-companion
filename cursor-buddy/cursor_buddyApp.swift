@@ -55,7 +55,7 @@ struct cursor_buddyApp: App {
                 }
                 .keyboardShortcut("j", modifiers: [.command, .option])
 
-                Button("New OpenAI Task…") {
+                Button("New Agent Task…") {
                     appDelegate.showNewTaskInputFromMenu()
                 }
                 .keyboardShortcut("n", modifiers: [.command, .option])

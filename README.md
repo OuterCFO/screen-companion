@@ -70,7 +70,7 @@ You can type instead of using local dictation.
 | Shift + Return | Insert a newline |
 | History or a task menu bar icon | Review that conversation in the compact panel |
 | Escape or × | Close the input, or dismiss the current answer and highlights |
-| Tools → New OpenAI Task | Start a separate task with its own session |
+| Tools → New Agent Task | Start a separate background task on the agent model (Codex or Claude Code) |
 
 Try: “Explain this page and point at the settings button.”
 For a separate task, use the explicit new-task command rather than expecting every screen question to become background work.

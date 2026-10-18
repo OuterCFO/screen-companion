@@ -68,7 +68,7 @@ See [official authentication documentation](https://learn.chatgpt.com/docs/auth)
 
 ## Explicit agent tasks
 
-Tools → New OpenAI Task starts a separate Codex task.
+Tools → New Agent Task starts a separate background task on the selected agent model, in Codex or Claude Code.
 Clicking its menu bar icon selects its transcript and follow-up target.
 Command + Option continues the selected target while the app is running.
 Selecting the normal OpenClicky task returns to the screen-answer session.
