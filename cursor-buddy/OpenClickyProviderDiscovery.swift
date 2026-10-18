@@ -3,7 +3,7 @@
 //  cursor-buddy
 //
 //  Minimal auto-discovery for the three terminal-first voice backends:
-//  Apple Foundation Models (on-device), Codex app-server / CLI, and Claude Agent SDK.
+//  Apple Foundation Models (on-device), Codex app-server / CLI, and Claude Code CLI.
 //  Does not package runtimes — only probes what is already installed.
 //
 
@@ -88,13 +88,12 @@ nonisolated enum OpenClickyProviderDiscovery {
     }
 
     static func claudeAvailability(fileManager: FileManager = .default) -> OpenClickyProviderAvailability {
-        // Probe PATH ourselves so this stays nonisolated (ClaudeAgentSDKAPI is @MainActor).
         let hasClaudeCLI = claudeExecutableURL(fileManager: fileManager) != nil
         let hasAnthropicKey = AppBundleConfiguration.anthropicAPIKey() != nil
         let available = hasClaudeCLI || hasAnthropicKey
         let detail: String
         if hasClaudeCLI {
-            detail = "Claude Code CLI detected for Agent SDK sign-in reuse."
+            detail = "Claude Code CLI detected for sign-in reuse."
         } else if hasAnthropicKey {
             detail = "No Claude CLI; Anthropic API key can still serve as fallback."
         } else {
@@ -108,26 +107,7 @@ nonisolated enum OpenClickyProviderDiscovery {
         )
     }
 
-    /// Mirrors `ClaudeAgentSDKAPI.findExecutable` without MainActor isolation.
     private static func claudeExecutableURL(fileManager: FileManager) -> URL? {
-        let environment = ProcessInfo.processInfo.environment
-        if let explicitPath = environment["OPENCLICKY_CLAUDE_EXECUTABLE"],
-           fileManager.isExecutableFile(atPath: explicitPath) {
-            return URL(fileURLWithPath: explicitPath)
-        }
-
-        let pathCandidates = (environment["PATH"] ?? "")
-            .split(separator: ":")
-            .map { URL(fileURLWithPath: String($0)).appendingPathComponent("claude", isDirectory: false) }
-
-        let fixedCandidates = [
-            fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/claude", isDirectory: false),
-            URL(fileURLWithPath: "/opt/homebrew/bin/claude", isDirectory: false),
-            URL(fileURLWithPath: "/usr/local/bin/claude", isDirectory: false)
-        ]
-
-        return (pathCandidates + fixedCandidates).first {
-            fileManager.isExecutableFile(atPath: $0.path)
-        }
+        ClaudeCodeCLIProtocol.findExecutable(fileManager: fileManager)
     }
 }

@@ -1,7 +1,7 @@
 // ThreeDGenerationTool.swift
 // Tool surface exposed to the chat agents (Codex / Claude).
 //
-// Both ClaudeAgentSDKAPI.swift and CodexAgentSession.swift register tools
+// Both ClaudeCodeCLIClient.swift and CodexAgentSession.swift register tools
 // the agent can call. This file provides:
 //   - A static JSON Schema usable by either backend.
 //   - A unified `invoke(...)` entry point that parses args, kicks off

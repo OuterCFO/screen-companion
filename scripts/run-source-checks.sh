@@ -14,6 +14,7 @@ for target in cursor-buddy OpenClickyWidgets cursor-buddyTests; do
   find "$target" -name '*.swift' -print0 | xargs -0 xcrun swiftc -parse
 done
 scripts/run-provider-catalog-tests.sh
+bash "$ROOT/scripts/run-claude-code-cli-tests.sh"
 bash "$ROOT/scripts/run-companion-conversation-tests.sh"
 
 bash "$ROOT/scripts/run-reply-markdown-tests.sh"

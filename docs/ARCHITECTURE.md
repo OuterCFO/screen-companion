@@ -52,7 +52,7 @@ Those historical internal names describe one implementation path, not the app's 
 `CompanionManager+AIResponsePipeline` selects among implemented provider adapters.
 The Codex provider uses a Codex session.
 The OpenAI adapter tries Codex first for non-speech responses and may fall back to an API key when configured.
-The Claude adapter prefers its local SDK/sign-in path and may fall back to an Anthropic API key.
+The Claude adapter runs the installed `claude` CLI with its own sign-in and may fall back to an Anthropic API key; see [Claude Code](CLAUDE-CODE.md).
 Apple's local adapter is text-only and does not preserve the same vision capability.
 Realtime speech and other upstream integrations have their own requirements.
 

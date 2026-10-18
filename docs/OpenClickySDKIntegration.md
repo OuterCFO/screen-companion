@@ -37,7 +37,6 @@ Bundle these into your host app target **at the resource root** (matching the ex
 - `OpenClickyBundledSkills/`
 - `OpenClickyBundledWikiSeed/`
 - `CodexRuntime/`
-- `ClaudeAgentSDKBridge/`
 - `agent-done.mp3`
 
 Example copy phase (same style as this repo):
@@ -46,7 +45,7 @@ Example copy phase (same style as this repo):
 ROOT="${PROJECT_DIR}/AppResources/OpenClicky"
 DST="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
 mkdir -p "$DST"
-for rel in SOUL.md OpenClickyModelInstructions.md AGENTS.md OpenClickyBundledSkills OpenClickyBundledWikiSeed CodexRuntime ClaudeAgentSDKBridge agent-done.mp3; do
+for rel in SOUL.md OpenClickyModelInstructions.md AGENTS.md OpenClickyBundledSkills OpenClickyBundledWikiSeed CodexRuntime agent-done.mp3; do
   if [ -e "$ROOT/$rel" ]; then
     rm -rf "$DST/$rel"
     /usr/bin/ditto "$ROOT/$rel" "$DST/$rel"

@@ -1107,6 +1107,10 @@ extension CompanionManager {
         onTextChunk: @MainActor @Sendable @escaping (String) -> Void
     ) async throws -> String {
         if let threadID = boundCodexThreadID {
+            if let sessionID = ClaudeCodeCLIProtocol.sessionID(fromLinkedThreadID: threadID) {
+                return try await claudeCodeSessionLink.submit(sessionID: sessionID, prompt: userPrompt,
+                    images: images, onTextChunk: onTextChunk)
+            }
             return try await sharedCodexSession.submit(threadID: threadID, prompt: userPrompt,
                 images: images, onTextChunk: onTextChunk)
         }
@@ -1175,32 +1179,31 @@ extension CompanionManager {
         assistantPrefill: String? = nil,
         onTextChunk: @MainActor @Sendable @escaping (String) -> Void
     ) async throws -> String {
-        // Inference routing rule: Claude Agent SDK FIRST (uses the local
+        // Inference routing rule: Claude Code CLI FIRST (uses the local
         // Claude Code sign-in the user already pays for), direct ClaudeAPI
-        // HTTP only as fallback when the SDK is unavailable or throws.
+        // HTTP only as fallback when the CLI is unavailable or throws.
         // Never short-circuit to HTTP for latency or capability reasons —
         // direct REST bills per token on the user's card.
-        print("🧠 analyzeClaudeResponse: model=\(model) sdkAvailable=\(claudeAgentSDKAPI != nil) httpKey=\(AppBundleConfiguration.anthropicAPIKey() != nil) prefill=\(assistantPrefill?.isEmpty == false)")
+        print("🧠 analyzeClaudeResponse: model=\(model) cliAvailable=\(claudeCodeCLI != nil) httpKey=\(AppBundleConfiguration.anthropicAPIKey() != nil) prefill=\(assistantPrefill?.isEmpty == false)")
         let modelOption = OpenClickyModelCatalog.voiceResponseModel(withID: model)
 
-        if let claudeAgentSDKAPI {
+        if let claudeCodeCLI {
             do {
-                claudeAgentSDKAPI.model = modelOption.id
-                claudeAgentSDKAPI.maxOutputTokens = modelOption.maxOutputTokens
-                print("🧠 analyzeClaudeResponse: using Agent SDK bridge")
-                let (text, _) = try await claudeAgentSDKAPI.analyzeImageStreaming(
+                claudeCodeCLI.model = modelOption.id
+                claudeCodeCLI.maxOutputTokens = modelOption.maxOutputTokens
+                print("🧠 analyzeClaudeResponse: using Claude Code CLI")
+                let (text, _) = try await claudeCodeCLI.analyzeImageStreaming(
                     images: images,
                     systemPrompt: systemPrompt,
                     conversationHistory: conversationHistory,
                     userPrompt: userPrompt,
-                    // M16: forward prefill to the SDK (primary) path so it behaves
-                    // like the HTTP fallback below.
+                    // The CLI cannot prefill; this format-sensitive path passes nil anyway.
                     assistantPrefill: assistantPrefill,
                     onTextChunk: onTextChunk
                 )
                 return text
             } catch is CancellationError {
-                // Cancellation means the user interrupted the primary SDK path;
+                // Cancellation means the user interrupted the primary CLI path;
                 // it is not an availability failure and must never trigger a
                 // paid direct-HTTP fallback.
                 throw CancellationError()
@@ -1211,12 +1214,12 @@ extension CompanionManager {
                     direction: "error",
                     event: "voice.response_fallback",
                     fields: [
-                        "from": "claude_agent_sdk",
+                        "from": "claude_code_cli",
                         "to": "anthropic_api_key",
                         "error": error.localizedDescription
                     ]
                 )
-                print("🔁 analyzeClaudeResponse: Agent SDK failed, falling back to direct HTTP: \(error.localizedDescription)")
+                print("🔁 analyzeClaudeResponse: Claude Code CLI failed, falling back to direct HTTP: \(error.localizedDescription)")
             }
         }
 
@@ -1237,7 +1240,7 @@ extension CompanionManager {
 
         print("❌ analyzeClaudeResponse: no SDK and no HTTP key — Claude not configured")
         throw NSError(
-            domain: "ClaudeAgentSDKAPI",
+            domain: "ClaudeCodeCLIClient",
             code: -1,
             userInfo: [NSLocalizedDescriptionKey: "Claude is not configured. Sign in to Claude Code locally or set an Anthropic API key."]
         )

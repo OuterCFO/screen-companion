@@ -896,12 +896,12 @@ extension CompanionManager: BrowserWorkspaceAgentDelegate {
     /// so treating it as a browser driver makes it answer from web search
     /// while ignoring the active built-in browser tab.
     public func hasAgentSDK() -> Bool {
-        return claudeAgentSDKAPI != nil
+        return claudeCodeCLI != nil
     }
 
     /// Provider-aware dispatch used by the Browser Workspace CUA fallback
     /// when no Anthropic API key is configured. This path must stay on Claude
-    /// Agent SDK because the Browser Workspace runner expects a text-only
+    /// Code because the Browser Workspace runner expects a text-only
     /// browser-tool protocol; Codex voice is not a safe substitute for that.
     public func analyzeImageWithAgentSDK(
         images: [(data: Data, label: String)],
@@ -912,11 +912,11 @@ extension CompanionManager: BrowserWorkspaceAgentDelegate {
     ) async throws -> String {
         let modelOption = OpenClickyModelCatalog.computerUseModel(withID: selectedComputerUseModel)
 
-        guard let sdk = claudeAgentSDKAPI else {
+        guard let sdk = claudeCodeCLI else {
             throw NSError(
                 domain: "CompanionManager",
                 code: -404,
-                userInfo: [NSLocalizedDescriptionKey: "No Browser Workspace CUA provider is available. Add an Anthropic API key or sign into the Claude Agent SDK."]
+                userInfo: [NSLocalizedDescriptionKey: "No Browser Workspace CUA provider is available. Add an Anthropic API key or sign in to Claude Code."]
             )
         }
 

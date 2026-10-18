@@ -14,6 +14,8 @@ It is independent of the commercial Clicky product and of OpenAI.
 - New task, Tasks, and Remove task controls live in the compact panel; independent screen conversations persist across restarts.
 - Connect links a cursor task to a live shared-server Codex terminal conversation, preserving its thread, settings, and history.
   See [shared-session setup and limits](docs/SHARED-SESSIONS.md).
+- Connect can also continue a saved Claude Code session in place with `--resume`, and Claude response models run through your signed-in `claude` CLI.
+  See [Claude Code setup and limits](docs/CLAUDE-CODE.md).
 - A task's menu bar icon opens its conversation history in the same panel.
 - Follow-ups stay with the selected session; separate tasks have separate transcripts.
 - Answers appear beside the moving AI pointer, with optional screen highlights.

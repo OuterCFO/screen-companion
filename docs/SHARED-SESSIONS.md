@@ -1,5 +1,7 @@
 # Connect the cursor to an existing Codex terminal session
 
+For Claude Code sessions, see [Use Claude Code with OpenClicky](CLAUDE-CODE.md).
+
 This first version supports live sessions owned by the shared local Codex app-server.
 Your desktop app may own its chats in a separate server; those chats are shown as unavailable and are not copied or resumed in another worker.
 Desktop integration remains a separate step.

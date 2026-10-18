@@ -201,7 +201,7 @@ struct OpenClickyComputerUseTests {
         #expect(apple.provider.voiceBackendFamily == .apple)
         #expect(apple.maxOutputTokens >= 64_000)
         #expect(OpenClickyVoiceBackendFamily.apple.defaultModelID == OpenClickyModelCatalog.appleFoundationModelID)
-        #expect(OpenClickyVoiceBackendFamily.claude.defaultModelID == "fable-5")
+        #expect(OpenClickyVoiceBackendFamily.claude.defaultModelID == "claude-fable-5-1")
         #expect(OpenClickyVoiceBackendFamily.codex.defaultModelID == OpenClickyModelCatalog.defaultCodexActionsModelID)
         #expect(OpenClickyVoiceBackendFamily.allCases.count == 3)
 
@@ -251,7 +251,7 @@ struct OpenClickyComputerUseTests {
         let resolved = OpenClickyModelCatalog.voiceResponseModel(withID: "definitely-not-a-real-model-id")
         #expect(resolved.id == OpenClickyModelCatalog.defaultVoiceResponseModelID)
         #expect(OpenClickyModelCatalog.isSpeechModelID(resolved.id))
-        #expect(resolved.id != "fable-5")
+        #expect(resolved.id != OpenClickyModelCatalog.defaultAnthropicResponseModelID)
     }
 
     @Test func realtimeTwoUsesLowReasoningEffortForVoiceLatency() throws {

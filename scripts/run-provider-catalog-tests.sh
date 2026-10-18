@@ -56,6 +56,15 @@ expect(OpenClickyModelCatalog.voiceResponseModel(withID: "gpt-6-luna").id == "gp
 expect(OpenClickyModelCatalog.computerUseModels.contains { $0.id == "gpt-6-luna" }, "Luna computer-use option")
 expect(OpenClickyModelCatalog.codexActionsModels.contains { $0.id == "gpt-6-luna" }, "Luna agent option")
 
+// --- Claude IDs resolve in both the Claude CLI and the Messages API ---
+for option in OpenClickyModelCatalog.voiceResponseModels + OpenClickyModelCatalog.computerUseModels where option.provider == .anthropic {
+    expect(option.id.hasPrefix("claude-"), "\(option.id) is a full Claude model ID")
+}
+expect(OpenClickyModelCatalog.voiceResponseModel(withID: "fable-5").id == "claude-fable-5-1", "saved legacy fable-5 migrates")
+expect(OpenClickyModelCatalog.voiceResponseModel(withID: "sonnet-5").id == "claude-sonnet-5-5", "saved legacy sonnet-5 migrates")
+expect(OpenClickyModelCatalog.computerUseModel(withID: "opus-5").id == "claude-opus-5-5", "saved legacy opus-5 migrates")
+expect(OpenClickyModelCatalog.delegationModel(withID: nil).id == "claude-sonnet-5-5", "delegation default is a real ID")
+
 // --- Catalog family mapping ---
 let apple = OpenClickyModelCatalog.voiceResponseModel(withID: OpenClickyModelCatalog.appleFoundationModelID)
 expect(apple.id == OpenClickyModelCatalog.appleFoundationModelID, "apple model id resolves")
@@ -141,6 +150,7 @@ xcrun swiftc -O -sdk "$SDK" -target "$TARGET" \
   "$ROOT/cursor-buddy/OpenClickyModelCatalog.swift" \
   "$ROOT/cursor-buddy/CodexRuntimeLocator.swift" \
   "$ROOT/cursor-buddy/OpenClickyProviderDiscovery.swift" \
+  "$ROOT/cursor-buddy/ClaudeCodeCLIProtocol.swift" \
   "$ROOT/cursor-buddy/ReplyVisibilityPolicy.swift" \
   "$ROOT/cursor-buddy/ReplyBubblePlacement.swift" \
   "$ROOT/cursor-buddy/ScreenTutorRoutingPolicy.swift" \

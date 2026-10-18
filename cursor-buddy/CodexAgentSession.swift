@@ -412,10 +412,10 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
 
     private let homeManager: CodexHomeManager
     private let processManager: CodexProcessManager
-    /// Optional Claude Agent SDK bridge used for money-rule-compliant title
+    /// Optional Claude Code CLI client used for money-rule-compliant title
     /// generation (SDK first, direct REST fallback). Injected by
     /// `CompanionManager`; nil when the SDK bridge is unavailable.
-    private let claudeAgentSDKAPI: ClaudeAgentSDKAPI?
+    private let claudeCodeCLI: ClaudeCodeCLIClient?
     private var currentAssistantEntryID: String?
     private var pendingAssistantDeltas: [String: String] = [:]
     private var pendingAssistantDeltaFlushTask: Task<Void, Never>?
@@ -444,7 +444,7 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
         accentTheme: OCCore.ClickyAccentTheme = .blue,
         homeManager: CodexHomeManager? = nil,
         processManager: CodexProcessManager? = nil,
-        claudeAgentSDKAPI: ClaudeAgentSDKAPI? = nil
+        claudeCodeCLI: ClaudeCodeCLIClient? = nil
     ) {
         self.id = id
         self.createdAt = Date()
@@ -452,7 +452,7 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
         self.accentTheme = accentTheme
         self.homeManager = homeManager ?? CodexHomeManager()
         self.processManager = processManager ?? CodexProcessManager()
-        self.claudeAgentSDKAPI = claudeAgentSDKAPI
+        self.claudeCodeCLI = claudeCodeCLI
 
         self.processManager.onNotification = { [weak self] notification in
             Task { @MainActor in
@@ -1886,11 +1886,11 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
         }
         #endif
 
-        // Money rule (AGENTS.md): the Claude Agent SDK is PRIMARY — it uses the
+        // Money rule (AGENTS.md): the Claude Code CLI is PRIMARY — it uses the
         // local, already-paid-for Claude Code sign-in. Direct ClaudeAPI HTTP
         // bills per token and is FALLBACK ONLY (SDK nil or throws). Previously
         // this method short-circuited straight to direct REST on every task.
-        if let sdk = claudeAgentSDKAPI {
+        if let sdk = claudeCodeCLI {
             do {
                 let (text, duration) = try await sdk.analyzeImageStreaming(
                     images: [],
@@ -1904,7 +1904,7 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
                         direction: "incoming",
                         event: "openclicky.agent_task.title_generated",
                         fields: [
-                            "provider": "claude_agent_sdk",
+                            "provider": "claude_code_cli",
                             "durationMs": Int((duration * 1000).rounded()),
                             "title": title
                         ]
@@ -1917,7 +1917,7 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
                     direction: "incoming",
                     event: "openclicky.agent_task.title_generation_failed",
                     fields: [
-                        "provider": "claude_agent_sdk",
+                        "provider": "claude_code_cli",
                         "error": error.localizedDescription
                     ]
                 )

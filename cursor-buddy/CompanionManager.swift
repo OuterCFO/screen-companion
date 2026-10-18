@@ -669,9 +669,9 @@ final class CompanionManager: ObservableObject {
         )
     }()
 
-    lazy var claudeAgentSDKAPI: ClaudeAgentSDKAPI? = {
+    lazy var claudeCodeCLI: ClaudeCodeCLIClient? = {
         let modelOption = OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel)
-        return ClaudeAgentSDKAPI(model: modelOption.id, maxOutputTokens: modelOption.maxOutputTokens)
+        return ClaudeCodeCLIClient(model: modelOption.id, maxOutputTokens: modelOption.maxOutputTokens)
     }()
 
     lazy var codexVoiceSession: CodexVoiceSession = {
@@ -1872,8 +1872,8 @@ final class CompanionManager: ObservableObject {
             // On-device — nothing to warm.
             break
         case .anthropic:
-            // SDK is the primary Claude path — warm it whenever available.
-            claudeAgentSDKAPI?.warmUp(systemPrompt: currentVoiceResponseSystemPrompt())
+            // The CLI is the primary Claude path; pre-start its next process.
+            claudeCodeCLI?.warmUp(systemPrompt: currentVoiceResponseSystemPrompt())
         case .openAI, .codex:
             if selectedVoiceResponseModel.provider == .codex || AppBundleConfiguration.openAIAPIKey() == nil {
                 codexVoiceSession.warmUp(systemPrompt: currentVoiceResponseSystemPrompt())
@@ -1916,8 +1916,8 @@ final class CompanionManager: ObservableObject {
         case .anthropic:
             claudeAPI.model = modelOption.id
             claudeAPI.maxOutputTokens = modelOption.maxOutputTokens
-            claudeAgentSDKAPI?.model = modelOption.id
-            claudeAgentSDKAPI?.maxOutputTokens = modelOption.maxOutputTokens
+            claudeCodeCLI?.model = modelOption.id
+            claudeCodeCLI?.maxOutputTokens = modelOption.maxOutputTokens
         case .openAI:
             let analysisModel = OpenClickyModelCatalog.voiceAnalysisModel(withID: modelOption.id)
             openAIAPI.model = analysisModel.id
@@ -2334,9 +2334,9 @@ final class CompanionManager: ObservableObject {
         case .apple:
             break
         case .anthropic:
-            // SDK is the primary Claude path — warm it whenever available.
-            if let claudeAgentSDKAPI {
-                claudeAgentSDKAPI.warmUp(systemPrompt: currentVoiceResponseSystemPrompt())
+            // The CLI is the primary Claude path; pre-start its next process.
+            if let claudeCodeCLI {
+                claudeCodeCLI.warmUp(systemPrompt: currentVoiceResponseSystemPrompt())
             }
             // Pre-init the HTTP ClaudeAPI client as fallback-only TLS warm-up
             // when a key is present. Its initializer kicks off a background
@@ -3345,7 +3345,7 @@ final class CompanionManager: ObservableObject {
         realtimeBidirectionalVoiceTurnGeneration &+= 1
         openAIRealtimeSpeechClient.cancelBidirectionalVoiceTurn()
         voiceTTSClient.cancelBidirectionalVoiceTurn()
-        claudeAgentSDKAPI?.stop()
+        claudeCodeCLI?.stop()
         codexVoiceSession.stop()
         codexAgentSessions.forEach { $0.stop(reason: "companion_stop") }
         // M11: tear down the Background Computer Use runtime too. Previously
@@ -3860,13 +3860,13 @@ final class CompanionManager: ObservableObject {
     @discardableResult
     func createAndSelectNewCodexAgentSession(title: String? = nil, accentTheme: ClickyAccentTheme? = nil) -> CodexAgentSession {
         let resolvedAccentTheme = accentTheme ?? Self.nextAgentDockAccentTheme(existingCount: codexAgentSessions.count)
-        // Inject the persistent Claude Agent SDK bridge so title generation
+        // Inject the Claude Code CLI client so title generation
         // follows the money rule (SDK first, direct REST fallback). See
         // CodexAgentSession.fastFriendlyTitle.
         let session = CodexAgentSession(
             title: title ?? "Ask Agent",
             accentTheme: resolvedAccentTheme,
-            claudeAgentSDKAPI: claudeAgentSDKAPI
+            claudeCodeCLI: claudeCodeCLI
         )
         codexAgentSessions.append(session)
         observeCodexAgentSession(session)
@@ -4308,18 +4308,18 @@ final class CompanionManager: ObservableObject {
                 fields["authMode"] = "anthropic_api_key_primary"
                 fields["transport"] = "sse"
                 fields["streamingMethod"] = "URLSession.bytes"
-                fields["agentSDKFallbackAvailable"] = claudeAgentSDKAPI != nil
-            } else if claudeAgentSDKAPI != nil {
-                fields["executionMethod"] = "ClaudeAgentSDKAPI.analyzeImageStreaming"
-                fields["authMode"] = "local_claude_agent_sdk_primary"
+                fields["agentSDKFallbackAvailable"] = claudeCodeCLI != nil
+            } else if claudeCodeCLI != nil {
+                fields["executionMethod"] = "ClaudeCodeCLIClient.analyzeImageStreaming"
+                fields["authMode"] = "local_claude_code_cli_primary"
                 fields["transport"] = "agent_sdk_query"
-                fields["streamingMethod"] = "claude_agent_sdk_query"
+                fields["streamingMethod"] = "claude_code_cli_query"
                 fields["apiKeyFallback"] = false
             } else {
-                fields["executionMethod"] = "ClaudeAgentSDKAPI.analyzeImageStreaming"
-                fields["authMode"] = "local_claude_agent_sdk_missing"
+                fields["executionMethod"] = "ClaudeCodeCLIClient.analyzeImageStreaming"
+                fields["authMode"] = "local_claude_code_cli_missing"
                 fields["transport"] = "agent_sdk_query"
-                fields["streamingMethod"] = "claude_agent_sdk_query"
+                fields["streamingMethod"] = "claude_code_cli_query"
             }
         case .openAI:
             if OpenClickyModelCatalog.isSpeechModelID(executionModel.id) {
@@ -8748,41 +8748,77 @@ final class CompanionManager: ObservableObject {
         }
         return client
     }()
+    lazy var claudeCodeSessionLink: ClaudeCodeSessionLink = {
+        let link = ClaudeCodeSessionLink()
+        link.onStatus = { [weak self] status in self?.sharedSessionStatus = status }
+        return link
+    }()
+    /// The linked Codex thread or Claude Code session (`claude:` prefix) of the selected compact task.
     var boundCodexThreadID: String? { compactInputAgentSessionID == nil ? companionConversations.active.boundThreadID : nil }
+
+    func linkedSessionTranscript(for threadID: String) async throws -> [CodexTranscriptEntry] {
+        if let sessionID = ClaudeCodeCLIProtocol.sessionID(fromLinkedThreadID: threadID) {
+            return try await claudeCodeSessionLink.transcript(for: sessionID)
+        }
+        if sharedCodexSession.connectedThreadID != threadID { try await sharedCodexSession.connect(to: threadID) }
+        return try await sharedCodexSession.transcript(for: threadID)
+    }
 
     func showCodexSessionConnectionPicker() {
         Task { @MainActor [weak self] in
             guard let self else { return }
+            // Each source is optional: Codex needs its shared server, Claude Code its local sessions.
+            let codexThreads = (try? await self.sharedCodexSession.listThreads()) ?? []
+            let claudeSessions = ClaudeCodeCLIProtocol.findExecutable() == nil ? [] : await self.claudeCodeSessionLink.listSessions()
+            enum Choice { case codex(SharedCodexThread), claude(SharedClaudeSession) }
+            let choices = codexThreads.filter(\.canConnect).map(Choice.codex) + claudeSessions.map(Choice.claude)
+            let alert = NSAlert()
+            alert.messageText = "Connect cursor to a session"
+            alert.informativeText = """
+            Codex: live sessions on the shared Codex server. Claude Code: saved sessions, continued with --resume so each question and answer joins that session's history.
+            The cursor uses the session's model and history. Claude Code turns can read files but not edit them. A Claude Code window that has the session open shows new turns after you resume it again.
+            """
+            guard !choices.isEmpty else {
+                alert.informativeText = "No compatible session is available. Open a Codex session in the current terminal client, or start a Claude Code session and send it a message. Nothing was copied or changed."
+                alert.addButton(withTitle: "OK"); alert.runModal(); return
+            }
+            let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 460, height: 28))
+            let relative = RelativeDateTimeFormatter()
+            for choice in choices {
+                switch choice {
+                case .codex(let thread): picker.addItem(withTitle: "Codex: " + thread.title)
+                case .claude(let session):
+                    let folder = URL(fileURLWithPath: session.cwd).lastPathComponent
+                    let state = session.liveStatus.map { " · open (\($0))" } ?? ""
+                    picker.addItem(withTitle: "Claude Code: \(session.title) · \(folder) · " +
+                                   relative.localizedString(for: session.modifiedAt, relativeTo: Date()) + state)
+                }
+            }
+            for thread in codexThreads where !thread.canConnect {
+                picker.addItem(withTitle: "Codex: " + thread.title + " - unavailable")
+                picker.lastItem?.isEnabled = false
+            }
+            alert.accessoryView = picker
+            alert.addButton(withTitle: "Connect"); alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn,
+                  choices.indices.contains(picker.indexOfSelectedItem) else { return }
             do {
-                let threads = try await self.sharedCodexSession.listThreads()
-                let live = threads.filter(\.canConnect)
-                let alert = NSAlert()
-                alert.messageText = "Connect cursor to Codex"
-                alert.informativeText = "Choose a live session on the shared Codex server. Sessions owned by a separate desktop server cannot attach yet. The cursor will use the selected session’s model, tools, permissions, and history."
-                guard !live.isEmpty else {
-                    alert.informativeText = "No compatible live Codex session is available. Open a session in the current Codex terminal client first. Your existing desktop chat was not copied or changed."
-                    alert.addButton(withTitle: "OK"); alert.runModal(); return
+                let threadID: String, title: String
+                switch choices[picker.indexOfSelectedItem] {
+                case .codex(let thread):
+                    try await self.sharedCodexSession.connect(to: thread.id)
+                    threadID = thread.id; title = "Codex: " + thread.title
+                case .claude(let session):
+                    threadID = ClaudeCodeCLIProtocol.linkedThreadID(sessionID: session.id); title = "Claude Code: " + session.title
                 }
-                let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 400, height: 28))
-                for thread in live { picker.addItem(withTitle: thread.title) }
-                for thread in threads where !thread.canConnect {
-                    picker.addItem(withTitle: thread.title + " - unavailable")
-                    picker.lastItem?.isEnabled = false
-                }
-                alert.accessoryView = picker
-                alert.addButton(withTitle: "Connect"); alert.addButton(withTitle: "Cancel")
-                guard alert.runModal() == .alertFirstButtonReturn,
-                      live.indices.contains(picker.indexOfSelectedItem) else { return }
-                let chosen = live[picker.indexOfSelectedItem]
-                try await self.sharedCodexSession.connect(to: chosen.id)
-                let entries = try await self.sharedCodexSession.transcript(for: chosen.id)
+                let entries = try await self.linkedSessionTranscript(for: threadID)
                 self.dismissCoachingOverlays()
                 self.saveCompactConversation()
-                self.companionConversations.bind(threadID: chosen.id, title: "Codex: " + chosen.title, entries: entries)
+                self.companionConversations.bind(threadID: threadID, title: title, entries: entries)
                 self.activateCompactConversation()
                 self.showTutorConversation()
             } catch {
-                let alert = NSAlert(); alert.messageText = "Could not connect to Codex"
+                let alert = NSAlert(); alert.messageText = "Could not connect to the session"
                 alert.informativeText = error.localizedDescription
                 alert.addButton(withTitle: "OK"); alert.runModal()
             }
@@ -8848,7 +8884,7 @@ final class CompanionManager: ObservableObject {
         if let id = linkedID {
             historyLoader = { [weak self] in
                 guard let self else { throw CancellationError() }
-                return try await self.sharedCodexSession.transcript(for: id)
+                return try await self.linkedSessionTranscript(for: id)
             }
         } else { historyLoader = nil }
         notchCaptureWindowManager.showConversationInput(entries: entries, historyVisible: historyVisible, title: title,
@@ -8867,8 +8903,7 @@ final class CompanionManager: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 do {
-                    if self.sharedCodexSession.connectedThreadID != threadID { try await self.sharedCodexSession.connect(to: threadID) }
-                    let entries = try await self.sharedCodexSession.transcript(for: threadID)
+                    let entries = try await self.linkedSessionTranscript(for: threadID)
                     guard self.companionConversations.activeID == taskID else { return }
                     self.homeChatEntries = entries
                     self.saveCompactConversation()
@@ -16322,14 +16357,14 @@ final class CompanionManager: ObservableObject {
         return "got that calibration anchor. repeat with the next screen anchor when you're ready."
     }
 
-    /// Lane-aware web-search capability note. Only the Claude Agent SDK voice
-    /// lane has the WebSearch/WebFetch tools enabled (see bridge.mjs), so only
+    /// Lane-aware web-search capability note. Only the Claude Code CLI voice
+    /// lane has the WebSearch/WebFetch tools enabled (see ClaudeCodeCLIProtocol), so only
     /// that lane should be told it can search inline. Every other lane keeps
     /// the shared prompt's hand-off-to-Agent-Mode behavior for live data.
     private func inlineWebSearchCapabilityPromptIfAvailable() -> String {
         let voiceModel = OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel)
         guard voiceModel.provider == .anthropic,
-              claudeAgentSDKAPI != nil else {
+              claudeCodeCLI != nil else {
             return ""
         }
         return """
