@@ -404,8 +404,8 @@ final class CompanionManager: ObservableObject {
             }
         }
     }
-    @Published private(set) var lastTranscript: String?
-    private(set) var currentAudioPowerLevel: CGFloat = 0 {
+    @Published var lastTranscript: String?
+    var currentAudioPowerLevel: CGFloat = 0 {
         didSet {
             cursorOverlayState.currentAudioPowerLevel = currentAudioPowerLevel
         }
@@ -512,21 +512,21 @@ final class CompanionManager: ObservableObject {
     @Published var isHomeChatModeActive = false
     @Published var handoffQueue: [HandoffQueuedRegionScreenshot] = []
     /// Sealed circle-while-talking stroke from the most recent PTT hold, awaiting voice/agent attach.
-    private(set) var pendingCircleSelectStroke: CircleSelectSealedStroke?
+    var pendingCircleSelectStroke: CircleSelectSealedStroke?
     /// Crop capture started at PTT release so the final transcript can attach without extra latency.
-    private var pendingCircleSelectCaptureTask: Task<HandoffQueuedRegionScreenshot?, Never>?
+    var pendingCircleSelectCaptureTask: Task<HandoffQueuedRegionScreenshot?, Never>?
     /// A sealed circle belongs to one just-finished voice hold. It must not
     /// survive indefinitely and become context for a later, unrelated task.
-    private var pendingCircleSelectExpiryTask: Task<Void, Never>?
+    var pendingCircleSelectExpiryTask: Task<Void, Never>?
     /// Live partial transcript while PTT is held — used to bias circle snap to spoken items.
-    private var circleSelectLivePartialTranscript: String = ""
+    var circleSelectLivePartialTranscript: String = ""
     let circleSelectSession = CircleSelectSession()
     @Published var agentDockItems: [ClickyAgentDockItem] = []
     /// Cursor-following speech bubble with Apple/Codex/Claude selector chips.
     /// Caption text still mirrors onto the full-screen cursor overlay when
     /// voice-response captions are enabled; this panel is the interactive path.
     let responseOverlayManager = CompanionResponseOverlayManager()
-    private var companionConversations = CompanionConversationStore.load(
+    var companionConversations = CompanionConversationStore.load(
         legacyEntries: CompanionManager.loadTutorChatEntries(),
         summary: UserDefaults.standard.string(forKey: "openClickyCompactedVoiceConversationArchive"))
     var tutorDockItemID: UUID { companionConversations.activeID }
@@ -628,8 +628,8 @@ final class CompanionManager: ObservableObject {
     /// the harness only spawns when the transcript itself says "agent".
     var pendingAgentOfferInstruction: String?
     var pendingAgentOfferAt: Date?
-    private var deferredLiveAgentRoutePartial: String?
-    private var deferredLiveAgentRoutePartialAt: Date?
+    var deferredLiveAgentRoutePartial: String?
+    var deferredLiveAgentRoutePartialAt: Date?
     /// Most recent user prompt in the shared instant/voice conversation.
     /// This lets a later referential agent request ("on it", "do that")
     /// resolve to what the user was just talking about, regardless of
@@ -641,7 +641,7 @@ final class CompanionManager: ObservableObject {
     var previousVoiceUserTranscriptAt: Date?
     static let pendingAgentVoiceFollowUpTTL: TimeInterval = 90
     private static let pendingAgentOfferTTL: TimeInterval = 90
-    private static let deferredLiveAgentRoutePartialTTL: TimeInterval = 20
+    static let deferredLiveAgentRoutePartialTTL: TimeInterval = 20
 
     /// Guards against a single voice utterance launching the same agent
     /// task twice when overlapping routes both resolve to an agent start.
@@ -685,7 +685,7 @@ final class CompanionManager: ObservableObject {
     private var pendingSystemAnnouncementSessionID: UUID?
     private var speakingSystemAnnouncementSessionID: UUID?
     private var silencedAgentSpeechSessionIDs: Set<UUID> = []
-    private var liveHandledComputerUseFingerprints: Set<String> = []
+    var liveHandledComputerUseFingerprints: Set<String> = []
     private var lastAgentProgressNarrationAt: Date?
     /// The phrase last spoken for each running agent session, keyed by
     /// session ID. Used to suppress duplicate progress narrations — we
@@ -705,7 +705,7 @@ final class CompanionManager: ObservableObject {
     private var lastNarratedAgentOutcomeBySessionID: [UUID: String] = [:]
 
     private var processingWatchdogTask: Task<Void, Never>?
-    private static let processingWatchdogTimeout: TimeInterval = 30
+    static let processingWatchdogTimeout: TimeInterval = 30
 
     private var shortcutTransitionCancellable: AnyCancellable?
     private var compactChordCancellable: AnyCancellable?
@@ -735,7 +735,7 @@ final class CompanionManager: ObservableObject {
     private var autoResumedRelaunchSessionIDs: Set<UUID> = []
     var tutorIdleCancellable: AnyCancellable?
     private var accessibilityCheckTimer: Timer?
-    private var pendingKeyboardShortcutStartTask: Task<Void, Never>?
+    var pendingKeyboardShortcutStartTask: Task<Void, Never>?
     private var pendingAgentDockItemRemovalTasks: [UUID: DispatchWorkItem] = [:]
 
     /// Screenshot captured in parallel with audio recording. Started the
@@ -1705,746 +1705,7 @@ final class CompanionManager: ObservableObject {
         persistRelaunchableAgentSessions()
     }
 
-    func dismissCoachingOverlays() {
-        interruptCurrentVoiceResponse()
-        // Suppress late chunks until a new question starts a fresh reply.
-        responseOverlayManager.dismissCurrentReply()
-        clearDetectedElementLocation()
-        visualGuidanceOverlayClearTasks.values.forEach { $0.cancel() }
-        visualGuidanceOverlayClearTasks.removeAll()
-        cursorOverlayState.visualGuidanceOverlays.removeAll()
-        latestVoiceResponseCard = nil
-    }
-
-    private func handleEscapeKeyPressed() {
-        let isVoiceActive = voiceState == .responding
-            || voiceState == .processing
-            || currentResponseTask != nil
-        guard isVoiceActive || responseOverlayManager.isVisible || hasActiveOverlayAnnotation else { return }
-        cancelCircleSelectSession(clearPending: true)
-        dismissCoachingOverlays()
-    }
-
-    private func handleShortcutTransition(_ transition: BuddyPushToTalkShortcut.ShortcutTransition) {
-        switch transition {
-        case .pressed:
-            guard !buddyDictationManager.isDictationInProgress else { return }
-            // Don't register push-to-talk while the onboarding video is playing
-            guard !showOnboardingVideo else { return }
-
-            // Cancel any pending transient hide so the overlay stays visible
-            transientHideTask?.cancel()
-            transientHideTask = nil
-
-            // If the cursor is hidden, bring it back transiently for this interaction
-            if !isClickyCursorEnabled && !isOverlayVisible {
-                overlayWindowManager.hasShownOverlayBefore = true
-                overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
-                isOverlayVisible = true
-            }
-
-            // Dismiss the menu bar panel so it doesn't cover the screen
-            NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
-
-            // Dismiss the onboarding prompt if it's showing
-            if showOnboardingPrompt {
-                withAnimation(.easeOut(duration: 0.3)) {
-                    onboardingPromptOpacity = 0.0
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                    self.showOnboardingPrompt = false
-                    self.onboardingPromptText = ""
-                }
-            }
-
-            ClickyAnalytics.trackPushToTalkStarted()
-
-            // Kick off the screenshot the moment the key goes down so it
-            // captures in parallel with audio recording instead of blocking
-            // the response path after the final transcript arrives.
-            startPrewarmedScreenshotCaptureIfPossible()
-            beginCircleSelectSessionIfEnabled()
-
-            pendingKeyboardShortcutStartTask?.cancel()
-
-            clearDetectedElementLocation()
-            liveHandledComputerUseFingerprints.removeAll()
-
-            pendingKeyboardShortcutStartTask = Task { [weak self] in
-                guard let buddyDictationManager = self?.buddyDictationManager else { return }
-
-                await buddyDictationManager.startPushToTalkFromKeyboardShortcut(
-                    currentDraftText: "",
-                    updateDraftText: { [weak self] partialTranscript in
-                        self?.circleSelectLivePartialTranscript = partialTranscript
-                        self?.circleSelectSession.refreshSnapUsingLatestTranscript()
-                        self?.handleLiveComputerUseTranscript(partialTranscript)
-                    },
-                    submitDraftText: { [weak self] finalTranscript in
-                        self?.handleFinalVoiceTranscript(finalTranscript)
-                    },
-                    onWillStartRecording: { [weak self] in
-                        // Only cut playback once the non-Realtime dictation
-                        // path is actually going to capture audio. A quick
-                        // press/release during provider or permission startup
-                        // should not skip the current spoken reply.
-                        self?.interruptCurrentVoiceResponse()
-                    }
-                )
-            }
-        case .released:
-            // Cancel the pending start task in case the user released the shortcut
-            // before the async startPushToTalk had a chance to begin recording.
-            // Without this, a quick press-and-release drops the release event and
-            // leaves the waveform overlay stuck on screen indefinitely.
-            ClickyAnalytics.trackPushToTalkReleased()
-            finishCircleSelectSessionForVoiceTurn()
-            pendingKeyboardShortcutStartTask?.cancel()
-            pendingKeyboardShortcutStartTask = nil
-            // Keep the prewarmed screenshot — even on a quick press the user
-            // may still produce a final transcript (e.g. wake-word). The
-            // freshness check in the consumer discards stale captures.
-            buddyDictationManager.stopPushToTalkFromKeyboardShortcut()
-        case .none:
-            break
-        }
-    }
-
-    func beginCircleSelectSessionIfEnabled() {
-        guard AppBundleConfiguration.isCircleWhileTalkingEnabled() else {
-            cancelCircleSelectSession(clearPending: false)
-            return
-        }
-        pendingCircleSelectCaptureTask?.cancel()
-        pendingCircleSelectCaptureTask = nil
-        pendingCircleSelectExpiryTask?.cancel()
-        pendingCircleSelectExpiryTask = nil
-        pendingCircleSelectStroke = nil
-        circleSelectLivePartialTranscript = ""
-        clearCircleSelectOverlay()
-        // Drop prior circle handoffs so a new hold never reuses a stale region.
-        handoffQueue.removeAll { $0.selection.hasFreehandPath }
-
-        let requireClick = AppBundleConfiguration.isCircleWhileTalkingRequireClickEnabled()
-        circleSelectSession.start(
-            requireClick: requireClick,
-            partialTranscriptProvider: { [weak self] in
-                guard let self else { return nil }
-                let live = self.circleSelectLivePartialTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !live.isEmpty { return live }
-                let last = self.lastTranscript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                return last.isEmpty ? nil : last
-            },
-            onPointsChanged: { [weak self] points in
-                self?.cursorOverlayState.circleSelectLivePoints = points
-            },
-            onSnapChanged: { [weak self] snap in
-                self?.cursorOverlayState.circleSelectSnappedRect = snap?.rect
-                self?.cursorOverlayState.circleSelectSnapLabel = snap?.label
-            }
-        )
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "voice.circle_select.started",
-            fields: [
-                "requireClick": requireClick
-            ]
-        )
-    }
-
-    func finishCircleSelectSessionForVoiceTurn() {
-        guard AppBundleConfiguration.isCircleWhileTalkingEnabled() || circleSelectSession.isActive else {
-            clearCircleSelectOverlay()
-            return
-        }
-
-        let sealed = circleSelectSession.stop()
-        // Keep snapped rect visible briefly after seal so the handoff feels deliberate.
-        if let snap = sealed?.snap {
-            cursorOverlayState.circleSelectSnappedRect = snap.rect
-            cursorOverlayState.circleSelectSnapLabel = snap.label
-        }
-        cursorOverlayState.circleSelectLivePoints = sealed?.points ?? []
-        pendingCircleSelectStroke = sealed
-
-        if let sealed {
-            // Keep the trail / snap visible briefly so the user sees the sealed region.
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(900))
-                guard let self else { return }
-                if self.pendingCircleSelectStroke?.sealedAt == sealed.sealedAt {
-                    self.clearCircleSelectOverlay()
-                }
-            }
-            pendingCircleSelectCaptureTask?.cancel()
-            pendingCircleSelectCaptureTask = Task { @MainActor in
-                do {
-                    let crop = try await CompanionScreenCaptureUtility.captureRegionAsJPEG(sealed.captureRect)
-                    let selection = sealed.handoffSelection(instruction: "")
-                    let queued = HandoffQueuedRegionScreenshot(selection: selection, imageData: crop.imageData)
-                    OpenClickyMessageLogStore.shared.append(
-                        lane: "voice",
-                        direction: "internal",
-                        event: "voice.circle_select.sealed",
-                        fields: [
-                            "pointCount": sealed.points.count,
-                            "pathLength": Int(sealed.pathLength.rounded()),
-                            "width": Int(sealed.captureRect.width.rounded()),
-                            "height": Int(sealed.captureRect.height.rounded()),
-                            "imageBytes": crop.imageData.count
-                        ]
-                    )
-                    return queued
-                } catch {
-                    OpenClickyMessageLogStore.shared.append(
-                        lane: "voice",
-                        direction: "error",
-                        event: "voice.circle_select.capture_failed",
-                        fields: ["error": error.localizedDescription]
-                    )
-                    return nil
-                }
-            }
-            pendingCircleSelectExpiryTask?.cancel()
-            pendingCircleSelectExpiryTask = Task { @MainActor [weak self] in
-                do {
-                    try await Task.sleep(for: .seconds(15))
-                } catch {
-                    return
-                }
-                guard let self,
-                      self.pendingCircleSelectStroke?.sealedAt == sealed.sealedAt else {
-                    return
-                }
-                self.cancelCircleSelectSession()
-                OpenClickyMessageLogStore.shared.append(
-                    lane: "voice",
-                    direction: "internal",
-                    event: "voice.circle_select.expired",
-                    fields: ["reason": "no_matching_voice_turn"]
-                )
-            }
-        } else {
-            clearCircleSelectOverlay()
-            pendingCircleSelectCaptureTask = nil
-            pendingCircleSelectExpiryTask?.cancel()
-            pendingCircleSelectExpiryTask = nil
-            OpenClickyMessageLogStore.shared.append(
-                lane: "voice",
-                direction: "internal",
-                event: "voice.circle_select.discarded",
-                fields: ["reason": "below_threshold_or_disabled"]
-            )
-        }
-    }
-
-    func cancelCircleSelectSession(clearPending: Bool = true) {
-        circleSelectSession.cancel()
-        clearCircleSelectOverlay()
-        if clearPending {
-            pendingCircleSelectStroke = nil
-            pendingCircleSelectCaptureTask?.cancel()
-            pendingCircleSelectCaptureTask = nil
-            pendingCircleSelectExpiryTask?.cancel()
-            pendingCircleSelectExpiryTask = nil
-        }
-    }
-
-    private func clearCircleSelectOverlay() {
-        cursorOverlayState.circleSelectLivePoints = []
-        cursorOverlayState.circleSelectSnappedRect = nil
-        cursorOverlayState.circleSelectSnapLabel = nil
-    }
-
-    /// Consumes a sealed circle-select capture for the current voice/agent turn.
-    /// Returns crop attachment data plus ambient note when the user circled while talking.
-    func consumePendingCircleSelectHandoff(instruction: String) async -> HandoffQueuedRegionScreenshot? {
-        let sealed = pendingCircleSelectStroke
-        let captureTask = pendingCircleSelectCaptureTask
-        pendingCircleSelectStroke = nil
-        pendingCircleSelectCaptureTask = nil
-        pendingCircleSelectExpiryTask?.cancel()
-        pendingCircleSelectExpiryTask = nil
-        clearCircleSelectOverlay()
-
-        guard sealed != nil || captureTask != nil else { return nil }
-
-        let queued = await captureTask?.value
-        if var existing = queued {
-            existing.selection.comment = instruction
-            if let sealed {
-                existing.selection.pathPoints = sealed.points
-                existing.selection.ambientSummary = sealed.ambient.summaryLine
-                existing.selection.startPositionInScreen = sealed.startPositionInScreen
-                existing.selection.endPositionInScreen = sealed.endPositionInScreen
-                existing.selection.screenFrame = sealed.screenFrame
-            }
-            return existing
-        }
-
-        guard let sealed else { return nil }
-        do {
-            let crop = try await CompanionScreenCaptureUtility.captureRegionAsJPEG(sealed.captureRect)
-            return HandoffQueuedRegionScreenshot(
-                selection: sealed.handoffSelection(instruction: instruction),
-                imageData: crop.imageData
-            )
-        } catch {
-            return nil
-        }
-    }
-
-    /// Fires from the processing watchdog when voiceState has been stuck
-    /// at .processing for longer than processingWatchdogTimeout seconds.
-    /// Resets UI state only — does NOT cancel in-flight tasks so a late
-    /// response can still arrive and transition to .responding normally.
-    private func recoverFromStuckProcessingStateIfNeeded() {
-        guard voiceState == .processing else { return }
-        voiceState = .idle
-        currentAudioPowerLevel = 0
-        clearVoiceResponseCaption()
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "voice.state.processing_watchdog_recovered",
-            fields: [
-                "timeoutSeconds": Int(Self.processingWatchdogTimeout),
-                "model": selectedModel
-            ]
-        )
-    }
-
-    func handleFinalVoiceTranscript(_ finalTranscript: String) {
-        lastTranscript = finalTranscript
-        let requestTiming = beginRequestTiming(source: "voice_final_transcript", text: finalTranscript)
-        activeRequestTiming = requestTiming
-        defer {
-            activeRequestTiming = nil
-            clearDeferredLiveAgentRoutePartial()
-        }
-        print("Companion received transcript: \(finalTranscript)")
-        lastVoiceInteractionCompletedAt = Date()
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "incoming",
-            event: "voice.transcript",
-            fields: [
-                "text": finalTranscript,
-                "requestID": requestTiming.requestID
-            ]
-        )
-        ClickyAnalytics.trackUserMessageSent(transcript: finalTranscript)
-
-        // The final transcript ends the live-partial window for every route.
-
-        if submitHomeChatVoiceTranscriptIfNeeded(finalTranscript, source: "voice_home_chat") {
-            return
-        }
-
-        if routeFinalVoiceTranscriptActionIfNeeded(
-            finalTranscript,
-            source: "voice",
-            selectionSource: "voice_final_transcript",
-            directComputerUseSource: "final_transcript",
-            includeQuickLocalResponses: true
-        ) {
-            return
-        }
-        // Remember this prompt in the same shared conversation context used
-        // by instant text and Realtime voice, so later "on it" / "do that"
-        // agent handoffs can resolve to the actual previous message.
-        rememberMainConversationUserPrompt(finalTranscript, source: "voice_final_transcript")
-
-        sendTranscriptToClaudeWithScreenshot(transcript: finalTranscript)
-    }
-
-    private func routeFinalVoiceTranscriptActionIfNeeded(
-        _ transcript: String,
-        source: String,
-        selectionSource: String,
-        directComputerUseSource: String,
-        includeQuickLocalResponses: Bool,
-        hybridAgentStartCountsAsHandled: Bool = false
-    ) -> Bool {
-        if handleAgentCancellationRequestIfNeeded(from: transcript) {
-            return true
-        }
-        if handleAgentStatusQuestionIfNeeded(from: transcript) {
-            return true
-        }
-        if handleClearOverlayAnnotationsRequestIfNeeded(from: transcript) {
-            return true
-        }
-        if handleVisualGuidanceCalibrationCursorSampleIfNeeded(from: transcript) {
-            return true
-        }
-        // Screen calibration is a voice visual-guidance flow, not Agent Mode.
-        // Keep it in the screenshot-aware voice lane even when the user
-        // phrases a retry as "get an agent to do a screen calibration."
-        if ScreenTutorRoutingPolicy.shouldStayInTutor(transcript) || Self.isScreenCalibrationRequest(transcript) {
-            return false
-        }
-        if handleAgentSelectionRequestIfNeeded(from: transcript, source: selectionSource) {
-            return true
-        }
-        if acceptPendingAgentOfferIfConfirmed(from: transcript) {
-            return true
-        }
-        if submitPendingAgentVoiceFollowUp(transcript) {
-            return true
-        }
-        if startHybridAgentTaskIfNeeded(from: transcript) {
-            return hybridAgentStartCountsAsHandled
-        }
-        if startExplicitAgentTaskIfRequested(from: transcript) {
-            return true
-        }
-        if startAgentTaskFromDeferredLiveAgentRouteIfNeeded(transcript) {
-            return true
-        }
-        if handleDirectComputerUseRequest(from: transcript, source: directComputerUseSource) {
-            return true
-        }
-        if includeQuickLocalResponses, handleQuickLocalVoiceResponseIfNeeded(from: transcript) {
-            return true
-        }
-        if submitContextualAgentFollowUp(transcript, source: source) {
-            return true
-        }
-        if startSmartAgentTaskIfNeeded(from: transcript) {
-            return true
-        }
-        if startImplicitAgentTaskIfNeeded(from: transcript) {
-            return true
-        }
-        return false
-    }
-
-    // MARK: - Companion Prompt
-
-    private func handleLiveComputerUseTranscript(_ partialTranscript: String) {
-        let trimmedTranscript = partialTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let isShortKnownAppRequest = Self.bareLocalAppOpenRequest(from: trimmedTranscript) != nil
-        guard trimmedTranscript.count >= 8 || isShortKnownAppRequest else { return }
-
-        let shouldTraceMiss = Self.isPotentialDirectComputerUseTranscript(trimmedTranscript)
-        if Self.shouldDeferLiveComputerUseForAgentRoute(trimmedTranscript) {
-            recordDeferredLiveAgentRoutePartial(trimmedTranscript)
-            if shouldTraceMiss {
-                OpenClickyMessageLogStore.shared.append(
-                    lane: "computer-use",
-                    direction: "incoming",
-                    event: "native_cua.live_partial.deferred_agent_route",
-                    fields: [
-                        "partialTranscript": trimmedTranscript
-                    ]
-                )
-            }
-            return
-        }
-
-        if let folderRequest = folderOpenRequest(from: trimmedTranscript) {
-            let fingerprint = Self.directComputerUseFingerprint(kind: "folder", value: folderRequest.url.path)
-            guard !liveHandledComputerUseFingerprints.contains(fingerprint) else { return }
-            liveHandledComputerUseFingerprints.insert(fingerprint)
-            let requestTiming = beginRequestTiming(source: "voice_live_partial", text: trimmedTranscript)
-            OpenClickyMessageLogStore.shared.append(
-                lane: "computer-use",
-                direction: "incoming",
-                event: "native_cua.live_partial.folder_detected",
-                fields: [
-                    "partialTranscript": trimmedTranscript,
-                    "executor": "native_cua",
-                    "route": "native_cua.open_folder",
-                    "executionMethod": "NSWorkspace.open",
-                    "path": folderRequest.url.path,
-                    "requestID": requestTiming.requestID
-                ]
-            )
-            withActiveRequestTiming(requestTiming) {
-                openRequestedFolder(folderRequest, shouldSpeak: false)
-            }
-            return
-        }
-
-        if Self.compositeAppActionRequest(from: trimmedTranscript) != nil {
-            // Composite app commands need the final transcript so the
-            // action is complete. Do not let the live-partial open-app
-            // shortcut swallow the action as just "Open <app>."
-            return
-        }
-
-        if let appOpenRequest = Self.localAppOpenRequest(from: trimmedTranscript) {
-            let fingerprint = Self.directComputerUseFingerprint(kind: "app", value: appOpenRequest.appName)
-            guard !liveHandledComputerUseFingerprints.contains(fingerprint) else { return }
-            guard Self.canResolveApplicationWithoutShellOpen(named: appOpenRequest.appName) else {
-                OpenClickyMessageLogStore.shared.append(
-                    lane: "computer-use",
-                    direction: "incoming",
-                    event: "native_cua.live_partial.app_candidate_unresolved",
-                    fields: [
-                        "partialTranscript": trimmedTranscript,
-                        "executor": "native_cua",
-                        "route": "native_cua.open_app",
-                        "executionMethod": "launchApplication(named:)",
-                        "appName": appOpenRequest.appName
-                    ]
-                )
-                return
-            }
-            let requestTiming = beginRequestTiming(source: "voice_live_partial", text: trimmedTranscript)
-            OpenClickyMessageLogStore.shared.append(
-                lane: "computer-use",
-                direction: "incoming",
-                event: "native_cua.live_partial.app_detected",
-                fields: [
-                    "partialTranscript": trimmedTranscript,
-                    "executor": "native_cua",
-                    "route": "native_cua.open_app",
-                    "executionMethod": "launchApplication(named:)",
-                    "appName": appOpenRequest.appName,
-                    "requestID": requestTiming.requestID
-                ]
-            )
-            withActiveRequestTiming(requestTiming) {
-                if openRequestedApplication(appOpenRequest, shouldSpeak: false) {
-                    liveHandledComputerUseFingerprints.insert(fingerprint)
-                }
-            }
-            return
-        }
-
-        if let keyPressRequest = Self.nativeKeyPressRequest(from: trimmedTranscript) {
-            let backend = selectedComputerUseBackend
-            let fingerprint = Self.directComputerUseFingerprint(
-                kind: "key",
-                value: "\(keyPressRequest.modifiers.joined(separator: "+"))+\(keyPressRequest.key)"
-            )
-            guard !liveHandledComputerUseFingerprints.contains(fingerprint) else { return }
-            liveHandledComputerUseFingerprints.insert(fingerprint)
-            let requestTiming = beginRequestTiming(source: "voice_live_partial", text: trimmedTranscript)
-            OpenClickyMessageLogStore.shared.append(
-                lane: "computer-use",
-                direction: "incoming",
-                event: "\(backend.executorID).live_partial.key_detected",
-                fields: [
-                    "partialTranscript": trimmedTranscript,
-                    "executor": backend.executorID,
-                    "route": "\(backend.executorID).press_key",
-                    "executionMethod": backend == .backgroundComputerUse
-                        ? "BackgroundComputerUse /v1/press_key"
-                        : "OpenClickyNativeComputerUseController.pressKey",
-                    "key": keyPressRequest.key,
-                    "modifiers": keyPressRequest.modifiers.joined(separator: ","),
-                    "requestID": requestTiming.requestID
-                ]
-            )
-            withActiveRequestTiming(requestTiming) {
-                pressKeyUsingSelectedComputerUse(keyPressRequest, shouldSpeak: false)
-            }
-            return
-        }
-
-        if shouldTraceMiss {
-            OpenClickyMessageLogStore.shared.append(
-                lane: "computer-use",
-                direction: "incoming",
-                event: "native_cua.live_partial.no_direct_match",
-                fields: [
-                    "partialTranscript": trimmedTranscript
-                ]
-            )
-        }
-    }
-
-    private func recordDeferredLiveAgentRoutePartial(_ partialTranscript: String) {
-        deferredLiveAgentRoutePartial = partialTranscript
-        deferredLiveAgentRoutePartialAt = Date()
-    }
-
-    private func clearDeferredLiveAgentRoutePartial() {
-        deferredLiveAgentRoutePartial = nil
-        deferredLiveAgentRoutePartialAt = nil
-    }
-
-    private func startAgentTaskFromDeferredLiveAgentRouteIfNeeded(_ finalTranscript: String) -> Bool {
-        let trimmedTranscript = finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedTranscript.isEmpty,
-              let partialTranscript = deferredLiveAgentRoutePartial,
-              let partialAt = deferredLiveAgentRoutePartialAt else {
-            return false
-        }
-
-        let partialAge = Date().timeIntervalSince(partialAt)
-        guard partialAge <= Self.deferredLiveAgentRoutePartialTTL,
-              let instruction = Self.deferredLiveAgentRouteInstruction(
-                partialTranscript: partialTranscript,
-                finalTranscript: trimmedTranscript
-              ) else {
-            return false
-        }
-
-        OpenClickyMessageLogStore.shared.append(
-            lane: "computer-use",
-            direction: "incoming",
-            event: "native_cua.final_transcript.deferred_agent_route_recovered",
-            fields: [
-                "partialTranscript": partialTranscript,
-                "finalTranscript": trimmedTranscript,
-                "partialAgeMs": Int(partialAge * 1000),
-                "executor": "agent_mode",
-                "route": "agent.start",
-                "requestID": activeRequestTiming?.requestID ?? "none"
-            ]
-        )
-        startVoiceAgentTaskPlan(instruction: instruction)
-        return true
-    }
-
-    private func startImplicitAgentTaskIfNeeded(from finalTranscript: String) -> Bool {
-        guard let instruction = Self.implicitAgentTaskInstruction(from: finalTranscript) else {
-            return false
-        }
-
-        OpenClickyMessageLogStore.shared.append(
-            lane: "agent",
-            direction: "incoming",
-            event: "openclicky.agent_task.implicit_route",
-            fields: [
-                "transcript": finalTranscript,
-                "instruction": instruction,
-                "executor": "agent_mode",
-                "route": "agent.start",
-                "requestID": activeRequestTiming?.requestID ?? "none"
-            ]
-        )
-        startVoiceAgentTaskPlan(
-            instruction: instruction,
-            acknowledgement: "i’ll take care of that in the background.",
-            voiceContextUserTranscript: finalTranscript
-        )
-        return true
-    }
-
-    private func startSmartAgentTaskIfNeeded(from finalTranscript: String) -> Bool {
-        guard let decision = Self.smartAgentRouteDecision(from: finalTranscript) else {
-            return false
-        }
-
-        OpenClickyMessageLogStore.shared.append(
-            lane: "agent",
-            direction: "incoming",
-            event: "openclicky.agent_task.smart_route",
-            fields: [
-                "transcript": finalTranscript,
-                "instruction": decision.instruction,
-                "reason": decision.reason,
-                "confidence": decision.confidence,
-                "executor": "agent_mode",
-                "route": "agent.start",
-                "requestID": activeRequestTiming?.requestID ?? "none"
-            ]
-        )
-        startVoiceAgentTaskPlan(
-            instruction: decision.instruction,
-            acknowledgement: decision.acknowledgement,
-            voiceContextUserTranscript: finalTranscript
-        )
-        return true
-    }
-
-    private func startHybridAgentTaskIfNeeded(from transcript: String) -> Bool {
-        guard let instruction = Self.hybridAgentTaskInstruction(from: transcript) else {
-            return false
-        }
-
-        OpenClickyMessageLogStore.shared.append(
-            lane: "agent",
-            direction: "incoming",
-            event: "openclicky.agent_task.hybrid_route",
-            fields: [
-                "transcript": transcript,
-                "instruction": instruction,
-                "executor": "agent_mode",
-                "route": "agent.hybrid_start",
-                "foregroundRoute": "voice.response",
-                "requestID": activeRequestTiming?.requestID ?? "none"
-            ]
-        )
-        startVoiceAgentTaskPlan(
-            instruction: instruction,
-            acknowledgement: "i’ll handle the background part too.",
-            route: "agent.hybrid_start",
-            interruptVoiceResponse: false,
-            voiceContextUserTranscript: transcript
-        )
-        return true
-    }
-
-    func autoEscalateVoiceResponseToAgentIfNeeded(
-        responseText: String,
-        transcript: String,
-        source: String,
-        route: String = "agent.auto_escalate"
-    ) -> Bool {
-        guard Self.shouldEscalateVoiceResponseToAgent(
-            responseText: responseText,
-            transcript: transcript
-        ) else {
-            return false
-        }
-
-        let acknowledgement: String
-        let instruction: String
-        let reason: String
-        if let decision = Self.smartAgentRouteDecision(from: transcript) {
-            acknowledgement = decision.acknowledgement
-            instruction = decision.instruction
-            reason = "smart_\(decision.reason)"
-        } else if let filesystemInstruction = Self.implicitFilesystemTaskInstruction(from: transcript) {
-            acknowledgement = Self.filesystemTaskAcknowledgement(from: transcript)
-            instruction = filesystemInstruction
-            reason = "filesystem_refusal_recovery"
-        } else if let implicitInstruction = Self.implicitAgentTaskInstruction(from: transcript) {
-            acknowledgement = "i’ll take care of that in the background."
-            instruction = implicitInstruction
-            reason = "implicit_refusal_recovery"
-        } else {
-            return false
-        }
-
-        OpenClickyMessageLogStore.shared.append(
-            lane: "agent",
-            direction: "incoming",
-            event: "openclicky.agent_task.voice_auto_escalated",
-            fields: [
-                "source": source,
-                "transcript": transcript,
-                "responseText": responseText,
-                "instruction": instruction,
-                "reason": reason,
-                "executor": "agent_mode",
-                "route": route,
-                "requestID": activeRequestTiming?.requestID ?? "none"
-            ]
-        )
-
-        pendingAgentOfferInstruction = nil
-        pendingAgentOfferAt = nil
-        startVoiceAgentTaskPlan(
-            instruction: instruction,
-            acknowledgement: acknowledgement,
-            route: route,
-            speakAcknowledgement: false,
-            interruptVoiceResponse: true,
-            voiceContextUserTranscript: transcript
-        )
-        return true
-    }
-
-    private func handleDirectComputerUseRequest(from transcript: String, source: String) -> Bool {
+    func handleDirectComputerUseRequest(from transcript: String, source: String) -> Bool {
         guard Self.logEvidenceAnalysisInstruction(from: transcript) == nil else {
             OpenClickyMessageLogStore.shared.append(
                 lane: "computer-use",
@@ -3748,7 +3009,7 @@ final class CompanionManager: ObservableObject {
     }
 
     @discardableResult
-    private func openRequestedApplication(
+    func openRequestedApplication(
         _ request: OpenClickyAppOpenRequest,
         shouldSpeak: Bool = true,
         logTiming: Bool = true
@@ -3828,7 +3089,7 @@ final class CompanionManager: ObservableObject {
         return false
     }
 
-    private func openRequestedFolder(_ request: OpenClickyFolderOpenRequest, shouldSpeak: Bool = true) {
+    func openRequestedFolder(_ request: OpenClickyFolderOpenRequest, shouldSpeak: Bool = true) {
         let executionStartedAt = markRequestExecutionStarted(
             route: "native_cua.open_folder",
             extra: [
@@ -3878,7 +3139,7 @@ final class CompanionManager: ObservableObject {
         )
     }
 
-    private func folderOpenRequest(from transcript: String) -> OpenClickyFolderOpenRequest? {
+    func folderOpenRequest(from transcript: String) -> OpenClickyFolderOpenRequest? {
         if let request = Self.localFolderOpenRequest(from: transcript) {
             return request
         }
@@ -4115,7 +3376,7 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    private func pressKeyUsingSelectedComputerUse(_ request: OpenClickyNativeKeyPressRequest, shouldSpeak: Bool = true) {
+    func pressKeyUsingSelectedComputerUse(_ request: OpenClickyNativeKeyPressRequest, shouldSpeak: Bool = true) {
         showActiveControlGlowForFocusedWindowOrScreen(label: "Key press", duration: 1.8)
         switch selectedComputerUseBackend {
         case .backgroundComputerUse:
@@ -5164,64 +4425,8 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    func showQuickTextInputFromMenuBar() {
-        guard hasAccessibilityPermission, hasScreenRecordingPermission else { return }
-        startPrewarmedScreenshotCaptureIfPossible()
-        NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
-        compactInputWindowManager.showTextInput { [weak self] submittedText in
-            self?.submitNewAgentTaskFromUI(submittedText, source: "menu_bar_quick_task_prompt")
-        }
-    }
-
-    private func showMainOpenClickyPanelFromShortcut() {
-        guard allPermissionsGranted else { return }
-        guard !buddyDictationManager.isKeyboardShortcutSessionActiveOrFinalizing else { return }
-
-        startPrewarmedScreenshotCaptureIfPossible()
-        NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
-        compactInputWindowManager.showTextInput { [weak self] submittedText in
-            self?.submitNewAgentTaskFromUI(submittedText, source: "notch_shortcut_task_prompt")
-        }
-    }
-
-    func showExternalDictationInput(mode: CompactPromptMode = .screen) {
-        // Remember the app the user was writing in before the compact panel takes focus.
-        if mode == .write {
-            let frontmost = NSWorkspace.shared.frontmostApplication
-            writeTargetApplication = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : frontmost
-        }
-        showTutorInput(startDictation: true, mode: mode)
-    }
-
-    func submitTutorPrompt(_ text: String, attachesScreen: Bool = true) {
-        ensureTutorDockItem()
-        submitTextModePrompt(text, allowsAgentRouting: false, attachesScreen: attachesScreen)
-    }
-
-    func saveCompactConversation() {
-        companionConversations.update(entries: companionConversations.active.boundThreadID == nil ? homeChatEntries : Array(homeChatEntries.suffix(24)), summary: compactedVoiceConversationArchive)
-        companionConversations.save()
-    }
-    private func refreshCompanionTaskIcons() {
-        companionConversations.collapseDuplicateLinks()
-        companionConversations.save()
-        let ids = Set(companionConversations.conversations.map(\.id))
-        agentDockItems.removeAll { ids.contains($0.id) }
-        for task in companionConversations.conversations where !task.archived {
-            agentDockItems.append(ClickyAgentDockItem(
-                id: task.id, sessionID: nil, title: task.title,
-                userInstruction: task.title, accentTheme: .mint, status: .done,
-                progressStageLabel: "Ready", progressStepText: nil, activityStatusLines: [],
-                caption: task.entries.last(where: { $0.role == .assistant })?.text,
-                suggestedNextActions: [], createdAt: task.entries.first?.createdAt ?? Date()))
-        }
-        showAgentDockWindowNearCurrentScreen()
-        agentMenuBarStatusManager.scheduleSync(companionManager: self)
-        scheduleStatusSync()
-    }
-    private func ensureTutorDockItem() { saveCompactConversation(); refreshCompanionTaskIcons() }
-    private var compactInputAgentSessionID: UUID?
-    @Published private(set) var sharedSessionStatus = "Disconnected"
+    var compactInputAgentSessionID: UUID?
+    @Published var sharedSessionStatus = "Disconnected"
     lazy var sharedCodexSession: CodexSharedSessionClient = {
         let client = CodexSharedSessionClient()
         client.onStatus = { [weak self] status in
@@ -5246,275 +4451,7 @@ final class CompanionManager: ObservableObject {
         ClaudeCodeSessionLinkSource(link: claudeCodeSessionLink)
     ]
 
-    func sessionLink(for threadID: String) throws -> SessionLink {
-        guard let link = sessionLinks.first(where: { $0.owns(threadID: threadID) }) else {
-            throw NSError(domain: "SessionLink", code: -1, userInfo: [NSLocalizedDescriptionKey: "This task's linked session type is not supported."])
-        }
-        return link
-    }
-
-    func linkedSessionTranscript(for threadID: String) async throws -> [CodexTranscriptEntry] {
-        try await sessionLink(for: threadID).transcript(threadID: threadID)
-    }
-
-    func showCodexSessionConnectionPicker() {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            var choices: [(link: SessionLink, session: LinkableSession)] = []
-            for link in self.sessionLinks where link.isAvailable {
-                choices += await link.listSessions().map { (link, $0) }
-            }
-            let alert = NSAlert()
-            alert.messageText = "Connect cursor to a session"
-            alert.informativeText = """
-            Codex: live sessions on the shared Codex server. Claude Code: saved sessions, continued with --resume so each question and answer joins that session's history.
-            The cursor uses the session's model and history. Claude Code turns can read files but not edit them. A Claude Code window that has the session open shows new turns after you resume it again.
-            """
-            guard choices.contains(where: \.session.canConnect) else {
-                alert.informativeText = "No compatible session is available. Open a Codex session in the current terminal client, or start a Claude Code session and send it a message. Nothing was copied or changed."
-                alert.addButton(withTitle: "OK"); alert.runModal(); return
-            }
-            // Connectable sessions first, keeping each source's own order.
-            choices = choices.filter(\.session.canConnect) + choices.filter { !$0.session.canConnect }
-            let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 460, height: 28))
-            for choice in choices {
-                let detail = choice.session.detail.isEmpty ? "" : " · " + choice.session.detail
-                picker.addItem(withTitle: "\(choice.link.sourceName): \(choice.session.title)\(detail)")
-                picker.lastItem?.isEnabled = choice.session.canConnect
-            }
-            alert.accessoryView = picker
-            alert.addButton(withTitle: "Connect"); alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn,
-                  choices.indices.contains(picker.indexOfSelectedItem) else { return }
-            let chosen = choices[picker.indexOfSelectedItem]
-            do {
-                try await chosen.link.connect(threadID: chosen.session.threadID)
-                let entries = try await chosen.link.transcript(threadID: chosen.session.threadID)
-                self.dismissCoachingOverlays()
-                self.saveCompactConversation()
-                self.companionConversations.bind(threadID: chosen.session.threadID,
-                                                 title: chosen.link.sourceName + ": " + chosen.session.title, entries: entries)
-                self.activateCompactConversation()
-                self.showTutorConversation()
-            } catch {
-                let alert = NSAlert(); alert.messageText = "Could not connect to the session"
-                alert.informativeText = error.localizedDescription
-                alert.addButton(withTitle: "OK"); alert.runModal()
-            }
-        }
-    }
-
-    private func activateCompactConversation() {
-        dismissCoachingOverlays()
-        if sharedCodexSession.connectedThreadID != companionConversations.active.boundThreadID {
-            sharedCodexSession.disconnect()
-            sharedSessionStatus = "Disconnected"
-        }
-        codexVoiceSession.stop()
-        codexVoiceSession = CodexVoiceSession(model: OpenClickyModelCatalog.codexVoiceSessionModel(withID: selectedModel).id,
-                                            homeManager: codexHomeManager)
-        homeChatEntries = companionConversations.active.entries
-        compactedVoiceConversationArchive = companionConversations.active.summary
-        conversationHistory = []
-        var prompt: String?
-        for entry in homeChatEntries {
-            if entry.role == .user { prompt = entry.text }
-            if entry.role == .assistant, let user = prompt {
-                conversationHistory.append((userTranscript: user, assistantResponse: entry.text)); prompt = nil
-            }
-        }
-        compactInputAgentSessionID = nil
-        companionConversations.save()
-        if let data = try? JSONEncoder().encode(homeChatEntries) { UserDefaults.standard.set(data, forKey: "openclicky.tutorChatHistory") }
-        if let summary = compactedVoiceConversationArchive {
-            UserDefaults.standard.set(summary, forKey: Self.compactedVoiceConversationArchiveDefaultsKey)
-        } else { UserDefaults.standard.removeObject(forKey: Self.compactedVoiceConversationArchiveDefaultsKey) }
-        refreshCompanionTaskIcons()
-    }
-    func startNewCompactTask() {
-        dismissCoachingOverlays()
-        saveCompactConversation()
-        companionConversations.startNew()
-        activateCompactConversation()
-        showTutorInput(startDictation: false)
-    }
-    func removeCurrentCompactTask() {
-        if let id = compactInputAgentSessionID {
-            stopCodexAgentSession(id, reason: "compact_task_removed")
-            archiveSession(id, allowIncomplete: true)
-            compactInputAgentSessionID = nil
-        } else {
-            dismissCoachingOverlays()
-            saveCompactConversation()
-            companionConversations.removeActive()
-            activateCompactConversation()
-        }
-        showTutorInput(startDictation: false)
-    }
-    private func presentCompactTask(entries: [CodexTranscriptEntry], historyVisible: Bool = false,
-                                    title: String, submit: @escaping (String) -> Void) {
-        let choices = companionConversations.conversations.filter { !$0.archived }.map {
-            CompactTaskChoice(id: $0.id, title: $0.title)
-        } + codexAgentSessions.filter { $0.hasVisibleActivity && !archivedSessionIDs.contains($0.id) }.map {
-            CompactTaskChoice(id: $0.id, title: $0.title)
-        }
-        let linkedID = boundCodexThreadID
-        let historyLoader: CompactHistoryLoader?
-        if let id = linkedID {
-            historyLoader = { [weak self] in
-                guard let self else { throw CancellationError() }
-                return try await self.linkedSessionTranscript(for: id)
-            }
-        } else { historyLoader = nil }
-        compactInputWindowManager.showConversationInput(entries: entries, historyVisible: historyVisible, title: title,
-            taskChoices: choices,
-            selectTask: { [weak self] id in _ = self?.showCompactConversationForAgentDockItem(id) },
-            loadHistory: historyLoader,
-            connectTask: { [weak self] in self?.showCodexSessionConnectionPicker() },
-            newTask: { [weak self] in self?.startNewCompactTask() },
-            removeTask: { [weak self] in self?.removeCurrentCompactTask() }, submit: submit)
-    }
-    func showTutorConversation() {
-        compactInputAgentSessionID = nil
-        ensureTutorDockItem()
-        if let threadID = boundCodexThreadID {
-            let taskID = companionConversations.activeID
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                do {
-                    let entries = try await self.linkedSessionTranscript(for: threadID)
-                    guard self.companionConversations.activeID == taskID else { return }
-                    self.homeChatEntries = entries
-                    self.saveCompactConversation()
-                    self.presentCompactTask(entries: entries, historyVisible: true,
-                        title: self.companionConversations.active.title) { [weak self] text in self?.submitTutorPrompt(text) }
-                } catch {
-                    guard self.companionConversations.activeID == taskID else { return }
-                    self.presentCompactTask(entries: self.homeChatEntries, historyVisible: true,
-                        title: "Disconnected - " + self.companionConversations.active.title) { [weak self] text in self?.submitTutorPrompt(text) }
-                }
-            }
-        } else {
-            presentCompactTask(entries: homeChatEntries, historyVisible: true,
-                               title: companionConversations.active.title) { [weak self] text in self?.submitTutorPrompt(text) }
-        }
-    }
-    @discardableResult
-    func showCompactConversationForAgentDockItem(_ itemID: UUID) -> Bool {
-        if companionConversations.conversations.contains(where: { $0.id == itemID && !$0.archived }) {
-            if companionConversations.activeID != itemID {
-                dismissCoachingOverlays(); saveCompactConversation()
-                companionConversations.select(itemID); activateCompactConversation()
-            }
-            showTutorConversation(); return true
-        }
-        let sessionID = agentDockItems.first(where: { $0.id == itemID })?.sessionID ?? itemID
-        guard let session = codexAgentSessions.first(where: { $0.id == sessionID }) else { return false }
-        compactInputAgentSessionID = sessionID
-        presentCompactTask(entries: session.entries, historyVisible: true, title: session.title) { [weak self] text in
-            self?.submitTextFollowUp(text, toAgentSessionID: sessionID)
-        }
-        return true
-    }
-    func showTutorInput(startDictation: Bool, mode: CompactPromptMode = .screen) {
-        guard hasAccessibilityPermission, hasScreenRecordingPermission else { return }
-        if mode != .textOnly { startPrewarmedScreenshotCaptureIfPossible() }
-        ensureTutorDockItem()
-        NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
-        if mode == .write {
-            let appName = writeTargetApplication?.localizedName ?? "the current app"
-            presentCompactTask(entries: [], title: "Write for \(appName)") { [weak self] text in
-                self?.performWriteRequest(text)
-            }
-        } else if mode == .textOnly {
-            compactInputAgentSessionID = nil
-            presentCompactTask(entries: homeChatEntries, title: "Quick question · " + companionConversations.active.title) { [weak self] text in
-                self?.submitTutorPrompt(text, attachesScreen: false)
-            }
-        } else if let sessionID = compactInputAgentSessionID,
-           let session = codexAgentSessions.first(where: { $0.id == sessionID }) {
-            presentCompactTask(entries: session.entries, title: session.title) { [weak self] text in
-                self?.submitTextFollowUp(text, toAgentSessionID: sessionID)
-            }
-        } else {
-            compactInputAgentSessionID = nil
-            presentCompactTask(entries: homeChatEntries, title: companionConversations.active.title) { [weak self] text in
-                self?.submitTutorPrompt(text)
-            }
-        }
-        guard startDictation else { return }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(350))
-            do {
-                try await OpenSuperWhisperDictation.trigger()
-            } catch {
-                let alert = NSAlert()
-                alert.messageText = "OpenSuperWhisper dictation unavailable"
-                alert.informativeText = error.localizedDescription
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            }
-        }
-    }
-
-    private func showNotchTextInput(
-        accentTheme: ClickyAccentTheme? = nil,
-        submitText: ((String) -> Void)? = nil
-    ) {
-        guard allPermissionsGranted else { return }
-        guard !buddyDictationManager.isKeyboardShortcutSessionActiveOrFinalizing else { return }
-
-        startPrewarmedScreenshotCaptureIfPossible()
-        NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
-        compactInputWindowManager.showTextInput(
-            accentTheme: accentTheme,
-            submitText: submitText ?? { [weak self] submittedText in
-                self?.submitTextModePrompt(submittedText)
-            }
-        )
-    }
-
-    func submitTextPrompt(_ submittedText: String) {
-        submitTextModePrompt(submittedText)
-    }
-
-    private func submitTextModePrompt(_ submittedText: String, allowsAgentRouting: Bool = true, attachesScreen: Bool = true) {
-        let trimmedText = submittedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedText.isEmpty else { return }
-
-        let requestTiming = beginRequestTiming(source: "text_mode", text: trimmedText)
-        activeRequestTiming = requestTiming
-        defer { activeRequestTiming = nil }
-        lastTranscript = trimmedText
-        rememberMainConversationUserPrompt(trimmedText, source: "text_mode")
-        ClickyAnalytics.trackUserMessageSent(transcript: trimmedText)
-        interruptCurrentVoiceResponse()
-        clearDetectedElementLocation()
-
-        // The compact panel skips the broad router but still honors an explicit request for an agent.
-        if !allowsAgentRouting, let instruction = ScreenTutorRoutingPolicy.explicitAgentInstruction(trimmedText) {
-            startVoiceAgentTaskPlan(instruction: instruction, speakAcknowledgement: false, voiceContextUserTranscript: trimmedText)
-            beginCursorReplyPresentation()
-            updateVoiceResponseCaption("<cursor_reply>Started a background task. Its result will appear here when it finishes.</cursor_reply>",
-                                       force: true, updatesDock: false)
-            return
-        }
-
-        if allowsAgentRouting, routeFinalVoiceTranscriptActionIfNeeded(
-            trimmedText,
-            source: "text",
-            selectionSource: "text_mode",
-            directComputerUseSource: "text_mode",
-            includeQuickLocalResponses: false
-        ) {
-            return
-        }
-
-        sendTranscriptToClaudeWithScreenshot(transcript: trimmedText, forceScreenContext: !allowsAgentRouting && attachesScreen,
-                                             routesAgentWork: allowsAgentRouting, attachesScreen: attachesScreen)
-    }
-
-    private func submitPendingAgentVoiceFollowUp(_ transcript: String) -> Bool {
+    func submitPendingAgentVoiceFollowUp(_ transcript: String) -> Bool {
         let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTranscript.isEmpty else { return false }
         guard let sessionID = pendingAgentVoiceFollowUpSessionID else { return false }
@@ -5719,7 +4656,7 @@ final class CompanionManager: ObservableObject {
         return normalized.range(of: delegationPattern, options: .regularExpression) != nil
     }
 
-    private func submitContextualAgentFollowUp(_ transcript: String, source: String) -> Bool {
+    func submitContextualAgentFollowUp(_ transcript: String, source: String) -> Bool {
         let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTranscript.isEmpty else { return false }
         guard !Self.isExplicitNewTaskRequest(trimmedTranscript) else { return false }
@@ -5776,7 +4713,7 @@ final class CompanionManager: ObservableObject {
         return true
     }
 
-    private func handleAgentSelectionRequestIfNeeded(from transcript: String, source: String) -> Bool {
+    func handleAgentSelectionRequestIfNeeded(from transcript: String, source: String) -> Bool {
         guard let request = Self.agentSelectionRequest(from: transcript) else { return false }
         let timing = activeRequestTiming
         let route = request.followUpText == nil ? "agent.select" : "agent.select_and_followup"
@@ -5949,7 +4886,7 @@ final class CompanionManager: ObservableObject {
     /// Returns true when the offer was accepted (caller should not route
     /// further). Falls through (returns false) when there's no pending
     /// offer, the offer expired, or the transcript isn't a confirmation.
-    private func acceptPendingAgentOfferIfConfirmed(from transcript: String) -> Bool {
+    func acceptPendingAgentOfferIfConfirmed(from transcript: String) -> Bool {
         guard let instruction = pendingAgentOfferInstruction,
               let offeredAt = pendingAgentOfferAt,
               Date().timeIntervalSince(offeredAt) <= Self.pendingAgentOfferTTL else {
@@ -6123,14 +5060,14 @@ final class CompanionManager: ObservableObject {
         return false
     }
 
-    private var hasActiveOverlayAnnotation: Bool {
+    var hasActiveOverlayAnnotation: Bool {
         detectedElementScreenLocation != nil
             || detectedElementDisplayFrame != nil
             || !cursorOverlayState.visualGuidanceOverlays.isEmpty
             || !cursorOverlayState.externalSecondaryCursors.isEmpty
     }
 
-    private func handleClearOverlayAnnotationsRequestIfNeeded(from transcript: String) -> Bool {
+    func handleClearOverlayAnnotationsRequestIfNeeded(from transcript: String) -> Bool {
         guard Self.isClearOverlayAnnotationsRequest(
             transcript,
             hasActiveOverlayAnnotation: hasActiveOverlayAnnotation
@@ -6171,7 +5108,7 @@ final class CompanionManager: ObservableObject {
         return true
     }
 
-    private func handleAgentCancellationRequestIfNeeded(from transcript: String) -> Bool {
+    func handleAgentCancellationRequestIfNeeded(from transcript: String) -> Bool {
         let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTranscript.isEmpty else { return false }
 
@@ -6345,7 +5282,7 @@ final class CompanionManager: ObservableObject {
         scheduleStatusSync()
     }
 
-    private func startExplicitAgentTaskIfRequested(from transcript: String) -> Bool {
+    func startExplicitAgentTaskIfRequested(from transcript: String) -> Bool {
         if let newTaskInstruction = Self.explicitNewTaskInstruction(from: transcript) {
             guard !newTaskInstruction.isEmpty else {
                 showShortSystemResponse("what should the new task be?")
@@ -6814,7 +5751,7 @@ final class CompanionManager: ObservableObject {
         return candidate
     }
 
-    private func handleQuickLocalVoiceResponseIfNeeded(from transcript: String) -> Bool {
+    func handleQuickLocalVoiceResponseIfNeeded(from transcript: String) -> Bool {
         guard let responseText = Self.quickLocalVoiceResponseText(for: transcript) else { return false }
 
         let timing = activeRequestTiming
@@ -6848,7 +5785,7 @@ final class CompanionManager: ObservableObject {
         return true
     }
 
-    private func handleAgentStatusQuestionIfNeeded(from transcript: String) -> Bool {
+    func handleAgentStatusQuestionIfNeeded(from transcript: String) -> Bool {
         guard Self.isAgentStatusQuestion(transcript) else { return false }
         let timing = activeRequestTiming
         let executionStartedAt = markRequestExecutionStarted(
@@ -7732,7 +6669,7 @@ final class CompanionManager: ObservableObject {
         return url.host ?? url.absoluteString
     }
 
-    private static func compositeAppActionRequest(from transcript: String) -> OpenClickyCompositeAppActionRequest? {
+    static func compositeAppActionRequest(from transcript: String) -> OpenClickyCompositeAppActionRequest? {
         let candidate = SpokenText.normalizedCommandCandidate(from: transcript)
         guard !candidate.isEmpty else { return nil }
         guard !isExplicitAgentRoutingCandidate(candidate) else { return nil }
@@ -8073,7 +7010,7 @@ final class CompanionManager: ObservableObject {
         "Use OpenClicky's available app automation, installed skills/connectors, or selected computer-use path to complete this full app action. Open \(request.appName) if needed, then perform this action in \(request.appName): \(request.actionText). Do not report success after only opening the app. Original request: \(request.instruction)"
     }
 
-    private static func localAppOpenRequest(from transcript: String) -> OpenClickyAppOpenRequest? {
+    static func localAppOpenRequest(from transcript: String) -> OpenClickyAppOpenRequest? {
         let trimmedTranscript = SpokenText.normalizedCommandCandidate(from: transcript)
         guard !trimmedTranscript.isEmpty else { return nil }
         guard !isExplicitAgentRoutingCandidate(trimmedTranscript) else { return nil }
@@ -8106,12 +7043,12 @@ final class CompanionManager: ObservableObject {
         return bareLocalAppOpenRequest(fromNormalizedCandidate: trimmedTranscript)
     }
 
-    private static func bareLocalAppOpenRequest(from transcript: String) -> OpenClickyAppOpenRequest? {
+    static func bareLocalAppOpenRequest(from transcript: String) -> OpenClickyAppOpenRequest? {
         let candidate = SpokenText.normalizedCommandCandidate(from: transcript)
         return bareLocalAppOpenRequest(fromNormalizedCandidate: candidate)
     }
 
-    private static func bareLocalAppOpenRequest(fromNormalizedCandidate candidate: String) -> OpenClickyAppOpenRequest? {
+    static func bareLocalAppOpenRequest(fromNormalizedCandidate candidate: String) -> OpenClickyAppOpenRequest? {
         let rawTarget = candidate.trimmingCharacters(in: CharacterSet(charactersIn: " \n\t.,:;!?-"))
         guard !rawTarget.isEmpty,
               !isExplicitAgentRoutingCandidate(rawTarget),
@@ -8523,7 +7460,7 @@ final class CompanionManager: ObservableObject {
         return nil
     }
 
-    private static func directComputerUseFingerprint(kind: String, value: String) -> String {
+    static func directComputerUseFingerprint(kind: String, value: String) -> String {
         let normalizedValue = value
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             .lowercased()
@@ -8531,7 +7468,7 @@ final class CompanionManager: ObservableObject {
         return "\(kind):\(normalizedValue)"
     }
 
-    private struct SmartAgentRouteDecision {
+    struct SmartAgentRouteDecision {
         let instruction: String
         let acknowledgement: String
         let reason: String
@@ -8596,7 +7533,7 @@ final class CompanionManager: ObservableObject {
         return pieces
     }
 
-    private static func shouldDeferLiveComputerUseForAgentRoute(_ transcript: String) -> Bool {
+    static func shouldDeferLiveComputerUseForAgentRoute(_ transcript: String) -> Bool {
         isAgentRoutingCandidate(transcript)
     }
 
@@ -8699,7 +7636,7 @@ final class CompanionManager: ObservableObject {
         """
     }
 
-    private static func smartAgentRouteDecision(from transcript: String) -> SmartAgentRouteDecision? {
+    static func smartAgentRouteDecision(from transcript: String) -> SmartAgentRouteDecision? {
         let candidate = SpokenText.normalizedAgentTaskInstruction(from: transcript)
         let normalized = SpokenText.normalizedSpokenCommandText(candidate)
         guard SpokenText.wordCount(in: normalized) >= 3 else { return nil }
@@ -9016,7 +7953,7 @@ final class CompanionManager: ObservableObject {
             || isIncompleteLocalAppOpenRequest(from: transcript)
     }
 
-    private static func deferredLiveAgentRouteInstruction(
+    static func deferredLiveAgentRouteInstruction(
         partialTranscript: String,
         finalTranscript: String
     ) -> String? {
@@ -9097,7 +8034,7 @@ final class CompanionManager: ObservableObject {
             || normalized.contains("status")
     }
 
-    private static func isPotentialDirectComputerUseTranscript(_ transcript: String) -> Bool {
+    static func isPotentialDirectComputerUseTranscript(_ transcript: String) -> Bool {
         let normalizedTranscript = transcript
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             .lowercased()
@@ -9507,7 +8444,7 @@ final class CompanionManager: ObservableObject {
         ].contains(normalized)
     }
 
-    private static func nativeKeyPressRequest(from transcript: String) -> OpenClickyNativeKeyPressRequest? {
+    static func nativeKeyPressRequest(from transcript: String) -> OpenClickyNativeKeyPressRequest? {
         let candidate = SpokenText.normalizedCommandCandidate(from: transcript)
         guard !candidate.isEmpty else { return nil }
 
@@ -9699,7 +8636,7 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    private static func canResolveApplicationWithoutShellOpen(named appName: String) -> Bool {
+    static func canResolveApplicationWithoutShellOpen(named appName: String) -> Bool {
         resolvedApplicationURL(named: appName) != nil
     }
 
@@ -11030,7 +9967,7 @@ final class CompanionManager: ObservableObject {
         agentDockWindowManager.endDrag()
     }
 
-    private func submitTextFollowUp(_ submittedText: String, toAgentSessionID sessionID: UUID) {
+    func submitTextFollowUp(_ submittedText: String, toAgentSessionID sessionID: UUID) {
         let trimmedText = submittedText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else { return }
         guard let session = codexAgentSessions.first(where: { $0.id == sessionID }) else {
@@ -11876,7 +10813,7 @@ final class CompanionManager: ObservableObject {
     /// Clears the cursor-following caption only. Does NOT dismiss the interactive
     /// provider-selector bubble — that has its own longer auto-hide hold so the
     /// user can still switch Apple/Codex/Claude after speech ends.
-    private func clearVoiceResponseCaption() {
+    func clearVoiceResponseCaption() {
         externalProxyClearTask?.cancel()
         externalProxyClearTask = nil
         cursorOverlayState.externalPrimaryCaptionText = nil
