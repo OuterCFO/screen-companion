@@ -41,7 +41,7 @@ struct OpenClickyExternalProxyCursor: Identifiable {
     var accentHex: String?
 }
 
-private struct OpenClickyPendingVisualGuidanceCalibrationAnchor {
+struct OpenClickyPendingVisualGuidanceCalibrationAnchor {
     let overlayID: UUID
     let caption: String
     let predictedRect: CGRect
@@ -104,74 +104,74 @@ struct ClickyAgentDockItem: Identifiable, Equatable {
     var createdAt: Date
 }
 
-private struct OpenClickyAppOpenRequest {
+struct OpenClickyAppOpenRequest {
     let appName: String
     let instruction: String
 }
 
-private struct OpenClickyAgentSelectionRequest {
+struct OpenClickyAgentSelectionRequest {
     let agentName: String
     let followUpText: String?
     let instruction: String
 }
 
-private struct OpenClickyNativeTypeRequest {
+struct OpenClickyNativeTypeRequest {
     let text: String
     let targetDescription: String
 }
 
-private struct OpenClickyNativeKeyPressRequest {
+struct OpenClickyNativeKeyPressRequest {
     let key: String
     let modifiers: [String]
     let targetDescription: String
 }
 
-private struct OpenClickyNativeClickRequest {
+struct OpenClickyNativeClickRequest {
     let targetDescription: String
     let targetPhrase: String?
     let prefersLastPointedElement: Bool
 }
 
-private struct OpenClickyFolderOpenRequest {
+struct OpenClickyFolderOpenRequest {
     let url: URL
     let displayName: String
     let instruction: String
 }
 
-private struct OpenClickyWebOpenRequest {
+struct OpenClickyWebOpenRequest {
     let url: URL
     let displayName: String
     let instruction: String
     let browserAppName: String?
 }
 
-private struct OpenClickyReminderAddRequest {
+struct OpenClickyReminderAddRequest {
     let title: String
     let instruction: String
 }
 
-private struct OpenClickyReminderCountRequest {
+struct OpenClickyReminderCountRequest {
     let instruction: String
 }
 
-private struct OpenClickyMessagesSearchRequest {
+struct OpenClickyMessagesSearchRequest {
     let personName: String
     let instruction: String
 }
 
-private struct OpenClickyCompositeAppActionRequest {
+struct OpenClickyCompositeAppActionRequest {
     let appName: String
     let actionText: String
     let instruction: String
 }
 
-private struct OpenClickyCompositeAppSearchActionRequest {
+struct OpenClickyCompositeAppSearchActionRequest {
     let appName: String
     let query: String
     let instruction: String
 }
 
-private struct OpenClickySpotifyPlaybackControlAction {
+struct OpenClickySpotifyPlaybackControlAction {
     enum Kind: String {
         case play
         case pause
@@ -204,7 +204,7 @@ private struct OpenClickySpotifyPlaybackControlAction {
     }
 }
 
-private struct OpenClickySystemVolumeControlAction {
+struct OpenClickySystemVolumeControlAction {
     enum Kind: String {
         case volumeUp
         case volumeDown
@@ -235,7 +235,7 @@ enum OpenClickyComputerUsePointingResolver: String {
     case unsupported = "unsupported"
 }
 
-nonisolated private struct OpenClickyLocalAutomationResult: Sendable {
+nonisolated struct OpenClickyLocalAutomationResult: Sendable {
     let output: String
     let errorOutput: String
     let terminationStatus: Int32
@@ -260,7 +260,7 @@ final class OpenClickyRequestCompletionState: @unchecked Sendable {
     }
 }
 
-nonisolated private enum OpenClickyLocalAutomationRunner {
+nonisolated enum OpenClickyLocalAutomationRunner {
     static func runAppleScript(_ script: String) -> OpenClickyLocalAutomationResult {
         let process = Process()
         let outputPipe = Pipe()
@@ -298,7 +298,7 @@ nonisolated private enum OpenClickyLocalAutomationRunner {
     }
 }
 
-nonisolated private enum OpenClickySystemOutputVolume {
+nonisolated enum OpenClickySystemOutputVolume {
     static func currentScalar() -> Float? {
         guard let deviceID = defaultOutputDeviceID() else { return nil }
         if let master = scalar(for: deviceID, element: kAudioObjectPropertyElementMain) {
@@ -14058,162 +14058,3 @@ extension CompanionManager {
     }
 }
 #endif
-
-// MARK: - Extracted voice-routing types
-//
-// VoiceRouter and SpokenText are top-level `nonisolated` enums extracted out of
-// the CompanionManager class so the routing brain is decoupled from the view
-// model's @MainActor state and is unit-testable. They live here (rather than in
-// their own files) only because this project's Xcode file-system-synchronized
-// group does not ingest .swift files created outside Xcode; move them into
-// VoiceRouter.swift / SpokenText.swift once those files are added via Xcode's
-// New File dialog (which registers them with the target).
-
-/// Pure, side-effect-free classification vocabulary for the voice routing
-/// cascade. Everything here operates purely on its `String` arguments.
-nonisolated enum VoiceRouter {
-
-    // MARK: Agent-work vocabulary
-
-    static func containsAgentWorkAction(_ normalized: String) -> Bool {
-        let actionPattern = #"\b(?:check|look\s+at|take\s+a\s+look|inspect|review|audit|fix|modify|change|update|edit|build|create|make|write|draft|research|search|find|summari[sz]e|organize|clean\s+up|cleanup|test|run|install|compare|read|move|rename|delete|prune|optimi[sz]e|wire|implement|add|remove|route|delegate|ensure|verify|validate|confirm|diagnose|investigate|repair|polish|improve|finish|sort\s+out|deal\s+with|take\s+care\s+of|make\s+sure|look\s+into|figure\s+out)\b"#
-        return normalized.range(of: actionPattern, options: .regularExpression) != nil
-    }
-
-    static func containsDurableWorkTarget(_ normalized: String) -> Bool {
-        let targetPattern = #"\b(?:openclicky|clicky|github|repo|repository|codebase|project|app|settings|preference|preferences|log|logs|memory|skill|skills|desktop|download|downloads|document|documents|folder|folders|file|files|code|diff|git|branch|pull\s+request|pr|issue|issues|bug|test|tests|build|swift|xcode|email|gmail|calendar|spreadsheet|sheet|doc|slides|voice|realtime|computer\s+use|tool|tools|tooling|model|models|routing|route|background|agent\s+mode)\b"#
-        return normalized.range(of: targetPattern, options: .regularExpression) != nil
-    }
-
-    static func containsFreshResearchRequest(_ normalized: String) -> Bool {
-        let researchPattern = #"\b(?:latest|live|price|news|weather|schedule|standings|research|look\s+up|search\s+(?:the\s+)?web|google|browse)\b"#
-        return normalized.range(of: researchPattern, options: .regularExpression) != nil
-    }
-
-    static func isSensitiveOrDestructiveAgentTaskRequest(_ normalized: String) -> Bool {
-        let destructivePattern = #"\b(?:delete|remove|erase|wipe|destroy|drop|revoke|reset|nuke|clear|purge|uninstall|terminate|kill)\b"#
-        let broadScopePattern = #"\b(?:all|everything|entire|whole)\b"#
-        let destructiveTargetPattern = #"\b(?:file|files|folder|folders|directory|directories|repo|repository|branch|branches|commit|commits|tag|tags|history|database|databases|keychain|account|accounts)\b"#
-        let sensitiveTargetsPattern = #"\b(?:account|accounts|credential|credentials|password|passwords|token|tokens|api\s*key|secret|secrets|permission|permissions|auth|ssh|private\s+key|keychain|database|databases|prod|production|system\s+settings)\b"#
-
-        let hasDestructiveVerb = normalized.range(of: destructivePattern, options: .regularExpression) != nil
-        let hasBroadScope = normalized.range(of: broadScopePattern, options: .regularExpression) != nil
-        let hasDestructiveTarget = normalized.range(of: destructiveTargetPattern, options: .regularExpression) != nil
-        let hasSensitiveTarget = normalized.range(of: sensitiveTargetsPattern, options: .regularExpression) != nil
-
-        // Safety policy:
-        // - credential/permission/auth targets are always confirmation-worthy.
-        // - destructive verbs are confirmation-worthy when aimed at a destructive target
-        //   or broad-scope operation.
-        return hasSensitiveTarget || (hasDestructiveVerb && (hasBroadScope || hasDestructiveTarget))
-    }
-
-    // MARK: Hybrid (do-now + fix-in-background) cues
-
-    static func containsHybridForegroundCue(_ normalized: String) -> Bool {
-        let foregroundPattern = #"\b(?:what|why|how|who|when|where|explain|tell\s+me|describe|summari[sz]e|answer|quick\s+(?:answer|thought|view)|what\s+do\s+you\s+think|do\s+you\s+think)\b"#
-        return normalized.range(of: foregroundPattern, options: .regularExpression) != nil
-    }
-
-    static func containsHybridBackgroundCue(_ normalized: String) -> Bool {
-        let backgroundPattern = #"\b(?:background|agent|agents|agent\s+mode|codex|do\s+the\s+work|work\s+on\s+it|take\s+care\s+of\s+it|also\s+(?:fix|implement|patch|research|find|check|review|update|change|build|create)|while\s+you(?:'re|re)?\s+(?:at\s+it|doing\s+that)|combination\s+of\s+the\s+two)\b"#
-        return normalized.range(of: backgroundPattern, options: .regularExpression) != nil
-    }
-
-    // MARK: Natural / referential background-work cues
-
-    static func containsNaturalBackgroundWorkCue(_ normalized: String) -> Bool {
-        let cuePattern = #"\b(?:make\s+sure|ensure|verify|validate|confirm|look\s+into|figure\s+out|sort\s+out|deal\s+with|take\s+care\s+of|get\s+(?:this|that|it|.+?)\s+working|wire\s+(?:up|in)|hook\s+(?:up|in)|set\s+up|finish|polish|improve|repair|diagnose|investigate)\b"#
-        if normalized.range(of: cuePattern, options: .regularExpression) != nil {
-            return true
-        }
-
-        let makeUsePattern = #"\b(?:make|have)\b.{1,80}\b(?:use|using|route|routing|send|sending|call|calling)\b"#
-        return normalized.range(of: makeUsePattern, options: .regularExpression) != nil
-    }
-
-    static func containsReferentialWorkTarget(_ normalized: String) -> Bool {
-        let referencePattern = #"\b(?:this|that|it|here|current\s+(?:file|screen|window|page|repo|repository|project|app)|visible\s+(?:file|code|screen|window|page)|selected\s+(?:text|file|code|region)|the\s+(?:current|visible|selected)\s+(?:thing|part|file|code|screen|window|page)|what\s+we\s+(?:just\s+)?(?:talked|discussed)\s+about|the\s+thing\s+from\s+before)\b"#
-        return normalized.range(of: referencePattern, options: .regularExpression) != nil
-    }
-}
-
-/// Spoken-transcript normalization utilities shared by the routing brain and
-/// the rest of the app. Pure, `nonisolated`, side-effect-free. These form a
-/// closed cluster: the only functions they call are each other.
-nonisolated enum SpokenText {
-
-    /// Lowercased, diacritic-folded, punctuation-stripped, single-spaced form
-    /// of a transcript — the canonical surface the routing predicates match.
-    static func normalizedSpokenCommandText(_ transcript: String) -> String {
-        transcript
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            .lowercased()
-            .replacingOccurrences(of: #"[^\p{L}\p{N}\s]+"#, with: " ", options: .regularExpression)
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-    }
-
-    static func wordCount(in text: String) -> Int {
-        text.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).count
-    }
-
-    /// Strips leading filler ("hey", "ok clicky", "i said to", "let's try that
-    /// again") and trailing punctuation so a raw transcript becomes a clean
-    /// command candidate.
-    static func normalizedCommandCandidate(from transcript: String) -> String {
-        var candidate = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let prefixPatterns = [
-            #"(?i)^\s*(?:hey|ok|okay|right|so|yeah|yep|well)[\s,]+"#,
-            #"(?i)^\s*(?:oh[\s,]+)?(?:no[\s,\.]+){1,3}"#,
-            #"(?i)^\s*(?:clicky|openclicky)[\s,]+"#,
-            #"(?i)^\s*i\s+(?:said|asked|told)\s+(?:for\s+you\s+to|you\s+to|to)\s+"#,
-            #"(?i)^\s*(?:let's|lets)\s+try\s+(?:that|this)\s+again[\s,]+"#,
-            #"(?i)^\s*(?:(?:can|could|would|will)\s+you\s+)?(?:do|use)\s+(?:the\s+)?computer[\s-]+use(?:\s+then)?\s+(?:to|and)\s+"#
-        ]
-
-        var didStripPrefix = true
-        while didStripPrefix {
-            didStripPrefix = false
-            for pattern in prefixPatterns {
-                guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
-                let range = NSRange(candidate.startIndex..<candidate.endIndex, in: candidate)
-                guard let match = regex.firstMatch(in: candidate, range: range),
-                      let matchRange = Range(match.range, in: candidate) else { continue }
-                candidate.removeSubrange(matchRange)
-                candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-                didStripPrefix = true
-            }
-        }
-
-        return candidate.trimmingCharacters(in: CharacterSet(charactersIn: " \n\t.,:;!?-–—…"))
-    }
-
-    /// Reduces a polite agent request ("can you...", "please...", "tell an
-    /// agent to...") down to the bare instruction.
-    static func normalizedAgentTaskInstruction(from instruction: String) -> String {
-        let trimmedInstruction = normalizedCommandCandidate(from: instruction)
-        guard !trimmedInstruction.isEmpty else { return trimmedInstruction }
-
-        let pattern = #"(?i)^\s*(?:(?:can|could|would|will)\s+you\s+|please\s+|(?:ask|tell)\s+(?:an?\s+|the\s+)?agent\s+to\s+)(.+?)[\.\!\?]*\s*$"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(
-                in: trimmedInstruction,
-                range: NSRange(trimmedInstruction.startIndex..<trimmedInstruction.endIndex, in: trimmedInstruction)
-              ),
-              let taskRange = Range(match.range(at: 1), in: trimmedInstruction) else {
-            return trimmedInstruction
-        }
-
-        return String(trimmedInstruction[taskRange])
-            .trimmingCharacters(in: CharacterSet(charactersIn: " \n\t.,:;!?-"))
-    }
-
-    static func cleanedAgentTaskInstruction(_ instruction: String) -> String {
-        instruction
-            .trimmingCharacters(in: CharacterSet(charactersIn: " \n\t.,:;!?-"))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-}
