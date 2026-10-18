@@ -415,7 +415,7 @@ final class CompanionManager: ObservableObject {
     @Published private(set) var hasMicrophonePermission = false
     @Published private(set) var hasScreenContentPermission = false
     @Published private(set) var hasFullDiskAccessPermission = false
-    @Published private(set) var hasSystemEventsAutomationPermission = false
+    @Published var hasSystemEventsAutomationPermission = false
 
     /// Screen location (global AppKit coords) of a detected UI element the
     /// buddy should fly to and point at. Parsed from Claude's response;
@@ -508,8 +508,8 @@ final class CompanionManager: ObservableObject {
     let wikiViewerPanelManager = WikiViewerPanelManager()
     @Published private(set) var bundledKnowledgeIndex = OCCore.WikiManager.Index.empty
     @Published var latestVoiceResponseCard: ClickyResponseCard?
-    @Published private(set) var homeChatEntries: [CodexTranscriptEntry] = CompanionManager.loadTutorChatEntries()
-    @Published private(set) var isHomeChatModeActive = false
+    @Published var homeChatEntries: [CodexTranscriptEntry] = CompanionManager.loadTutorChatEntries()
+    @Published var isHomeChatModeActive = false
     @Published var handoffQueue: [HandoffQueuedRegionScreenshot] = []
     /// Sealed circle-while-talking stroke from the most recent PTT hold, awaiting voice/agent attach.
     private(set) var pendingCircleSelectStroke: CircleSelectSealedStroke?
@@ -521,7 +521,7 @@ final class CompanionManager: ObservableObject {
     /// Live partial transcript while PTT is held — used to bias circle snap to spoken items.
     private var circleSelectLivePartialTranscript: String = ""
     let circleSelectSession = CircleSelectSession()
-    @Published private(set) var agentDockItems: [ClickyAgentDockItem] = []
+    @Published var agentDockItems: [ClickyAgentDockItem] = []
     /// Cursor-following speech bubble with Apple/Codex/Claude selector chips.
     /// Caption text still mirrors onto the full-screen cursor overlay when
     /// voice-response captions are enabled; this panel is the interactive path.
@@ -529,13 +529,13 @@ final class CompanionManager: ObservableObject {
     private var companionConversations = CompanionConversationStore.load(
         legacyEntries: CompanionManager.loadTutorChatEntries(),
         summary: UserDefaults.standard.string(forKey: "openClickyCompactedVoiceConversationArchive"))
-    private var tutorDockItemID: UUID { companionConversations.activeID }
+    var tutorDockItemID: UUID { companionConversations.activeID }
 
     /// Anthropic API key for direct Claude requests.
     /// Environment fallback supports Xcode schemes and local launch scripts.
     private static let anthropicAPIKey = AppBundleConfiguration.anthropicAPIKey()
     private static let openAIAPIKey = AppBundleConfiguration.openAIAPIKey()
-    private static let tutorModeDefaultsKey = "isTutorModeEnabled"
+    static let tutorModeDefaultsKey = "isTutorModeEnabled"
 
     private static func initialTutorModeEnabled() -> Bool {
         UserDefaults.standard.object(forKey: tutorModeDefaultsKey) as? Bool ?? false
@@ -606,350 +606,12 @@ final class CompanionManager: ObservableObject {
     }
 
     var conversationHistory: [(userTranscript: String, assistantResponse: String)] = CompanionManager.restoredTutorExchanges()
-    private var compactedVoiceConversationArchive: String?
-    private static let activeVoiceConversationHistoryLimit = 8
-    private static let compactedVoiceConversationArchiveCharacterLimit = 2_400
-    private static let compactedVoiceConversationArchiveDefaultsKey = "openClickyCompactedVoiceConversationArchive"
-
-    func setHomeChatModeActive(_ isActive: Bool, source: String) {
-        guard isHomeChatModeActive != isActive else { return }
-        isHomeChatModeActive = isActive
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "openclicky.home_chat.mode_changed",
-            fields: [
-                "source": source,
-                "isActive": isActive
-            ]
-        )
-    }
-
-    func submitHomeChatPromptFromUI(_ prompt: String, source: String = "open_clicky_panel_chat") {
-        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPrompt.isEmpty else { return }
-        setHomeChatModeActive(true, source: source)
-        submitHomeChatPromptToAskAgent(trimmedPrompt, source: source)
-    }
-
-    @discardableResult
-    private func submitHomeChatVoiceTranscriptIfNeeded(_ transcript: String, source: String) -> Bool {
-        guard isHomeChatModeActive else { return false }
-        let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedTranscript.isEmpty else { return false }
-        submitHomeChatPromptToAskAgent(trimmedTranscript, source: source)
-        return true
-    }
-
-    private func submitHomeChatPromptToAskAgent(_ prompt: String, source: String) {
-        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPrompt.isEmpty else { return }
-        let session = codexAgentSession
-        OpenClickyMessageLogStore.shared.append(
-            lane: "agent",
-            direction: "incoming",
-            event: "openclicky.home_chat.ask_agent_prompt",
-            fields: [
-                "source": source,
-                "sessionID": session.id.uuidString,
-                "title": session.title,
-                "instructionLength": trimmedPrompt.count
-            ]
-        )
-        if session.isTurnActiveForChatQueue {
-            session.submitPromptFromUI(trimmedPrompt, screenContext: nil)
-        } else {
-            stageDashboardAgentSubmission(prompt: trimmedPrompt, session: session)
-            submitAgentPrompt(trimmedPrompt, to: session)
-        }
-    }
-
-    private func appendHomeChatEntry(role: CodexTranscriptEntry.Role, text: String) {
-        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedText.isEmpty else { return }
-        if let last = homeChatEntries.last,
-           last.role == role,
-           SpokenText.normalizedSpokenCommandText(last.text) == SpokenText.normalizedSpokenCommandText(trimmedText) {
-            return
-        }
-        homeChatEntries.append(CodexTranscriptEntry(role: role, text: trimmedText))
-        if homeChatEntries.count > 24 {
-            homeChatEntries.removeFirst(homeChatEntries.count - 24)
-        }
-        if let data = try? JSONEncoder().encode(homeChatEntries) {
-            UserDefaults.standard.set(data, forKey: "openclicky.tutorChatHistory")
-            saveCompactConversation()
-        }
-    }
-
-    func rememberVoiceExchange(userTranscript: String, assistantResponse: String, reason: String) {
-        let trimmedUserTranscript = userTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedAssistantResponse = assistantResponse.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedUserTranscript.isEmpty, !trimmedAssistantResponse.isEmpty else { return }
-
-        appendHomeChatEntry(role: .user, text: trimmedUserTranscript)
-        appendHomeChatEntry(role: .assistant, text: trimmedAssistantResponse)
-        if let index = agentDockItems.firstIndex(where: { $0.id == tutorDockItemID }) {
-            agentDockItems[index].userInstruction = trimmedUserTranscript
-            agentDockItems[index].caption = trimmedAssistantResponse
-            agentDockItems[index].status = .done
-            agentDockItems[index].progressStageLabel = "Ready"
-        }
-
-        conversationHistory.append((
-            userTranscript: trimmedUserTranscript,
-            assistantResponse: trimmedAssistantResponse
-        ))
-        compactVoiceConversationHistoryIfNeeded(reason: reason)
-        OpenClickyMessageLogStore.shared.appendConversationTurn(
-            lane: "voice",
-            direction: "incoming",
-            role: "user",
-            text: trimmedUserTranscript,
-            source: reason,
-            title: "Voice conversation",
-            extraFields: [
-                "historyCount": conversationHistory.count,
-                "archiveSummaryLength": compactedVoiceConversationArchive?.count ?? 0
-            ]
-        )
-        OpenClickyMessageLogStore.shared.appendConversationTurn(
-            lane: "voice",
-            direction: "outgoing",
-            role: "assistant",
-            text: trimmedAssistantResponse,
-            source: reason,
-            title: "Voice conversation",
-            extraFields: [
-                "historyCount": conversationHistory.count,
-                "archiveSummaryLength": compactedVoiceConversationArchive?.count ?? 0
-            ]
-        )
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "voice.conversation_history.updated",
-            fields: [
-                "reason": reason,
-                "historyCount": conversationHistory.count,
-                "archiveSummaryLength": compactedVoiceConversationArchive?.count ?? 0,
-                "userTranscriptLength": trimmedUserTranscript.count,
-                "assistantResponseLength": trimmedAssistantResponse.count
-            ]
-        )
-    }
-
-    private func rememberSilentAgentHandoff(userTranscript: String, instruction: String, reason: String) {
-        let trimmedUserTranscript = userTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedInstruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedUserTranscript.isEmpty, !trimmedInstruction.isEmpty else { return }
-
-        let contextResponse = Self.agentHandoffVoiceContextResponse(instruction: trimmedInstruction)
-        conversationHistory.append((
-            userTranscript: trimmedUserTranscript,
-            assistantResponse: contextResponse
-        ))
-        compactVoiceConversationHistoryIfNeeded(reason: reason)
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "voice.agent_handoff_context_preserved",
-            fields: [
-                "reason": reason,
-                "historyCount": conversationHistory.count,
-                "archiveSummaryLength": compactedVoiceConversationArchive?.count ?? 0,
-                "instructionPreview": Self.voiceArchiveSnippet(trimmedInstruction, limit: 180)
-            ]
-        )
-    }
-
-    func voiceConversationHistoryForAPI() -> [(userPlaceholder: String, assistantResponse: String)] {
-        var history: [(userPlaceholder: String, assistantResponse: String)] = []
-        if let compactedVoiceConversationArchive,
-           !compactedVoiceConversationArchive.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            history.append((
-                userPlaceholder: "[earlier OpenClicky voice context]",
-                assistantResponse: compactedVoiceConversationArchive
-            ))
-        }
-        history.append(contentsOf: conversationHistory.map { entry in
-            (userPlaceholder: entry.userTranscript, assistantResponse: entry.assistantResponse)
-        })
-        return Self.voiceConversationHistoryIncludingRecentUnpairedPrompts(
-            baseHistory: history,
-            lastPrompt: lastVoiceUserTranscript,
-            lastPromptAt: lastVoiceUserTranscriptAt,
-            previousPrompt: previousVoiceUserTranscript,
-            previousPromptAt: previousVoiceUserTranscriptAt
-        )
-    }
-
-    static func voiceConversationHistoryIncludingRecentUnpairedPrompts(
-        baseHistory: [(userPlaceholder: String, assistantResponse: String)],
-        lastPrompt: String?,
-        lastPromptAt: Date?,
-        previousPrompt: String?,
-        previousPromptAt: Date?,
-        now: Date = Date()
-    ) -> [(userPlaceholder: String, assistantResponse: String)] {
-        var history = baseHistory
-        var seenPrompts = Set(history.map { SpokenText.normalizedSpokenCommandText($0.userPlaceholder) })
-        let candidates: [(String?, Date?)] = [
-            (previousPrompt, previousPromptAt),
-            (lastPrompt, lastPromptAt)
-        ]
-
-        for (candidate, candidateAt) in candidates {
-            guard let candidate,
-                  let candidateAt,
-                  now.timeIntervalSince(candidateAt) <= pendingAgentVoiceFollowUpTTL else {
-                continue
-            }
-            let trimmedCandidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-            let normalizedCandidate = SpokenText.normalizedSpokenCommandText(trimmedCandidate)
-            guard !trimmedCandidate.isEmpty,
-                  !seenPrompts.contains(normalizedCandidate),
-                  !isReferentialAgentInstruction(trimmedCandidate) else {
-                continue
-            }
-            history.append((
-                userPlaceholder: trimmedCandidate,
-                assistantResponse: "OpenClicky routed that voice request into the app or Agent Mode, so keep it as the current conversation topic."
-            ))
-            seenPrompts.insert(normalizedCandidate)
-        }
-
-        return history
-    }
-
-    private func compactVoiceConversationHistoryIfNeeded(reason: String) {
-        let activeLimit = Self.activeVoiceConversationHistoryLimit
-        guard conversationHistory.count > activeLimit else { return }
-
-        let archiveCount = conversationHistory.count - activeLimit
-        let archivedEntries = Array(conversationHistory.prefix(archiveCount))
-        conversationHistory.removeFirst(archiveCount)
-
-        let archiveChunk = archivedEntries.map { entry in
-            "User: \(Self.voiceArchiveSnippet(entry.userTranscript))\nOpenClicky: \(Self.voiceArchiveSnippet(entry.assistantResponse))"
-        }.joined(separator: "\n")
-
-        let mergedArchive: String
-        if let existing = compactedVoiceConversationArchive,
-           !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            mergedArchive = existing + "\n" + archiveChunk
-        } else {
-            mergedArchive = archiveChunk
-        }
-        compactedVoiceConversationArchive = Self.trailingCharacters(
-            of: mergedArchive,
-            limit: Self.compactedVoiceConversationArchiveCharacterLimit
-        )
-        persistCompactedVoiceConversationArchive(
-            archiveChunk: archiveChunk,
-            reason: reason,
-            archivedExchangeCount: archivedEntries.count
-        )
-
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "voice.conversation_history.compacted",
-            fields: [
-                "reason": reason,
-                "archivedExchangeCount": archivedEntries.count,
-                "activeHistoryCount": conversationHistory.count,
-                "archiveSummaryLength": compactedVoiceConversationArchive?.count ?? 0
-            ]
-        )
-    }
-
-    private func persistCompactedVoiceConversationArchive(archiveChunk: String, reason: String, archivedExchangeCount: Int) {
-        let savedArchive = compactedVoiceConversationArchive?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !savedArchive.isEmpty else { return }
-
-        UserDefaults.standard.set(savedArchive, forKey: Self.compactedVoiceConversationArchiveDefaultsKey)
-        saveCompactConversation()
-
-        let trimmedChunk = archiveChunk.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedChunk.isEmpty else { return }
-
-        do {
-            try codexHomeManager.appendPersistentMemoryEvent(
-                userRequest: "Automatically compact OpenClicky voice context",
-                agentResponse: "Compacted \(archivedExchangeCount) older exchange\(archivedExchangeCount == 1 ? "" : "s") during \(reason): \(trimmedChunk)"
-            )
-        } catch {
-            OpenClickyMessageLogStore.shared.append(
-                lane: "voice",
-                direction: "internal",
-                event: "voice.conversation_history.compaction_memory_failed",
-                fields: [
-                    "reason": reason,
-                    "archivedExchangeCount": archivedExchangeCount,
-                    "error": error.localizedDescription
-                ]
-            )
-        }
-    }
-
-    private static func voiceArchiveSnippet(_ text: String, limit: Int = 220) -> String {
-        let normalized = text
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard normalized.count > limit else { return normalized }
-        return String(normalized.prefix(limit)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
-    }
-
-    private static func trailingCharacters(of text: String, limit: Int) -> String {
-        guard text.count > limit else { return text }
-        return "…\n" + String(text.suffix(limit))
-    }
-
-    func rememberMainConversationUserPrompt(_ transcript: String, source: String) {
-        let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedTranscript.isEmpty,
-              trimmedTranscript != "Realtime voice input",
-              !Self.isReferentialAgentInstruction(trimmedTranscript) else {
-            return
-        }
-        if let lastVoiceUserTranscript,
-           let lastVoiceUserTranscriptAt,
-           Date().timeIntervalSince(lastVoiceUserTranscriptAt) < 2,
-           SpokenText.normalizedSpokenCommandText(lastVoiceUserTranscript) == SpokenText.normalizedSpokenCommandText(trimmedTranscript) {
-            return
-        }
-
-        if let lastVoiceUserTranscript {
-            previousVoiceUserTranscript = lastVoiceUserTranscript
-            previousVoiceUserTranscriptAt = lastVoiceUserTranscriptAt
-        }
-        lastVoiceUserTranscript = trimmedTranscript
-        lastVoiceUserTranscriptAt = Date()
-        appendHomeChatEntry(role: .user, text: trimmedTranscript)
-
-        OpenClickyMessageLogStore.shared.append(
-            lane: "voice",
-            direction: "internal",
-            event: "voice.main_conversation_context.updated",
-            fields: [
-                "source": source,
-                "promptLength": trimmedTranscript.count,
-                "promptPreview": String(trimmedTranscript.prefix(160))
-            ]
-        )
-    }
-
+    var compactedVoiceConversationArchive: String?
     /// The currently running AI response task, if any. Cancelled when the user
     /// speaks again so a new response can begin immediately.
     var currentResponseTask: Task<Void, Never>?
     var currentResponseTaskToken: UUID?
 
-    func clearCurrentResponseTask(ifMatches token: UUID) {
-        guard currentResponseTaskToken == token else { return }
-        currentResponseTask = nil
-        currentResponseTaskToken = nil
-    }
     var currentVoiceResponseRequestID: String?
     var currentVoiceResponseCompletionToken: UUID?
     var currentVoiceResponseCancellationHandler: ((String) -> Void)?
@@ -973,11 +635,11 @@ final class CompanionManager: ObservableObject {
     /// resolve to what the user was just talking about, regardless of
     /// whether the prior turn came from push-to-talk, Realtime voice, or
     /// the panel's instant text entry.
-    private var lastVoiceUserTranscript: String?
-    private var lastVoiceUserTranscriptAt: Date?
-    private var previousVoiceUserTranscript: String?
-    private var previousVoiceUserTranscriptAt: Date?
-    private static let pendingAgentVoiceFollowUpTTL: TimeInterval = 90
+    var lastVoiceUserTranscript: String?
+    var lastVoiceUserTranscriptAt: Date?
+    var previousVoiceUserTranscript: String?
+    var previousVoiceUserTranscriptAt: Date?
+    static let pendingAgentVoiceFollowUpTTL: TimeInterval = 90
     private static let pendingAgentOfferTTL: TimeInterval = 90
     private static let deferredLiveAgentRoutePartialTTL: TimeInterval = 20
 
@@ -1183,7 +845,7 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    private let runtimeMode: OpenClickyCompanionRuntimeMode
+    let runtimeMode: OpenClickyCompanionRuntimeMode
 
     init(runtimeMode: OpenClickyCompanionRuntimeMode = .menuBar) {
         self.runtimeMode = runtimeMode
@@ -1250,346 +912,11 @@ final class CompanionManager: ObservableObject {
         return .default
     }()
 
-    func setAgentParkingPosition(_ position: AgentParkingPosition) {
-        guard agentParkingPosition != position else { return }
-        agentParkingPosition = position
-        UserDefaults.standard.set(position.rawValue, forKey: AgentParkingPosition.userDefaultsKey)
-        // Re-park the dock immediately if it's already on screen so the
-        // user sees the change without having to spawn a new agent.
-        showAgentDockWindowNearCurrentScreenIfShowing()
-    }
-
-    func setAgentParkingCalibrationOffset(_ offset: CGSize, for position: AgentParkingPosition) {
-        AgentParkingPosition.setCalibrationOffset(offset, for: position)
-        showAgentDockWindowNearCurrentScreenIfShowing()
-    }
-
-    private func showAgentDockWindowNearCurrentScreenIfShowing() {
-        guard !agentDockItems.isEmpty else { return }
-        showAgentDockWindowNearCurrentScreen()
-    }
-
-    private func refreshAgentDockFollowBehavior() {
-        let shouldAutoFollowCursor = !OpenClickyPresentationPolicy.menuBarOnly && agentDockItems.contains { item in
-            item.status == .starting || item.status == .running
-        }
-        if shouldAutoFollowCursor {
-            if agentDockFollowTimer == nil {
-                let timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-                    Task { @MainActor [weak self] in
-                        guard let self else { return }
-                        guard !self.agentDockItems.isEmpty else { return }
-                        guard !self.agentDockWindowManager.hasUserPinnedFrame else { return }
-                        self.showAgentDockWindowNearCurrentScreen()
-                    }
-                }
-                RunLoop.main.add(timer, forMode: .common)
-                agentDockFollowTimer = timer
-            }
-        } else {
-            agentDockFollowTimer?.invalidate()
-            agentDockFollowTimer = nil
-        }
-    }
     let userActivityIdleDetector = UserActivityIdleDetector()
     let tutorTargetClickTracker = TutorTargetClickTracker()
     var isTutorObservationInFlight = false
     var lastVoiceInteractionCompletedAt: Date = .distantPast
-    static let tutorObservationVoiceCooldown: TimeInterval = 90
-    private var agentDockFollowTimer: Timer?
-
-    private static func initialVoiceResponseModelID() -> String {
-        let defaults = UserDefaults.standard
-        let storedModel = defaults.string(forKey: "selectedVoiceResponseModel")
-
-        let requestedModel = storedModel
-            ?? defaults.string(forKey: "selectedClaudeModel")
-            ?? OpenClickyModelCatalog.defaultVoiceResponseModelID
-        let resolvedModel = OpenClickyModelCatalog.voiceResponseModel(withID: requestedModel).id
-
-        // Persist alias migrations so retired IDs are not carried forward.
-        if storedModel != resolvedModel {
-            defaults.set(resolvedModel, forKey: "selectedVoiceResponseModel")
-        }
-
-        return resolvedModel
-    }
-
-    func setSelectedModel(_ model: String) {
-        let selectedVoiceResponseModel = OpenClickyModelCatalog.voiceResponseModel(withID: model)
-        let resolvedModel = selectedVoiceResponseModel.id
-        selectedModel = resolvedModel
-        UserDefaults.standard.set(resolvedModel, forKey: "selectedVoiceResponseModel")
-        applyVoiceResponseModelSettings(selectedVoiceResponseModel)
-        answerProviders.warmUp(for: selectedVoiceResponseModel, systemPrompt: currentVoiceResponseSystemPrompt())
-    }
-
-    /// Coarse family for the bubble / notch selector (Apple / Codex / Claude).
-    var selectedVoiceBackendFamily: OpenClickyVoiceBackendFamily? {
-        OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel).provider.voiceBackendFamily
-    }
-
-    /// Select a terminal-first backend family, mapping to its default model.
-    /// Unavailable families are ignored so selection stays discovery-gated.
-    func setSelectedVoiceBackendFamily(_ family: OpenClickyVoiceBackendFamily) {
-        guard OpenClickyProviderDiscovery.isAvailable(family) else { return }
-        setSelectedModel(family.defaultModelID)
-    }
-
-    func setSelectedComputerUseModel(_ model: String) {
-        let resolvedModel = OpenClickyModelCatalog.computerUseModel(withID: model).id
-        selectedComputerUseModel = resolvedModel
-        UserDefaults.standard.set(resolvedModel, forKey: "selectedComputerUseModel")
-    }
-
-    var selectedComputerUseBackend: OpenClickyComputerUseBackendID {
-        OpenClickyComputerUseBackendID.resolving(selectedComputerUseBackendID)
-    }
-
-    func applyVoiceResponseModelSettings(_ modelOption: OpenClickyModelOption) {
-        for provider in answerProviders.chain(for: modelOption) where provider.isAvailable { provider.prepare(for: modelOption) }
-    }
-
-    func setSelectedComputerUseBackend(_ backendID: String) {
-        let backend = OpenClickyComputerUseBackendID.resolving(backendID)
-        selectedComputerUseBackendID = backend.rawValue
-        UserDefaults.standard.set(backend.rawValue, forKey: AppBundleConfiguration.userComputerUseBackendDefaultsKey)
-        if backend == .backgroundComputerUse {
-            backgroundComputerUseController.refreshStatus()
-        }
-        OpenClickyMessageLogStore.shared.append(
-            lane: "computer-use",
-            direction: "internal",
-            event: "computer_use.backend_selected",
-            fields: [
-                "backend": backend.rawValue,
-                "executor": backend.executorID
-            ]
-        )
-    }
-
-    func setNativeComputerUseEnabled(_ enabled: Bool) {
-        nativeComputerUseController.setEnabled(enabled)
-    }
-
-    func refreshNativeComputerUseStatus() {
-        nativeComputerUseController.refreshStatus()
-    }
-
-    func refreshNativeComputerUseFocusedTarget() {
-        _ = nativeComputerUseController.refreshFocusedTarget()
-    }
-
-    func refreshBackgroundComputerUseStatus() {
-        backgroundComputerUseController.refreshStatus()
-        OpenClickyMessageLogStore.shared.append(
-            lane: "computer-use",
-            direction: "internal",
-            event: "background_computer_use.status_refreshed",
-            fields: [
-                "status": backgroundComputerUseController.status.summary,
-                "manifestPath": backgroundComputerUseController.status.manifestPath
-            ]
-        )
-    }
-
-    func startBackgroundComputerUseRuntime() {
-        backgroundComputerUseController.startRuntime()
-        OpenClickyMessageLogStore.shared.append(
-            lane: "computer-use",
-            direction: "outgoing",
-            event: "background_computer_use.start_requested",
-            fields: [
-                "sourceRoot": backgroundComputerUseController.status.sourceRootPath,
-                "manifestPath": backgroundComputerUseController.status.manifestPath
-            ]
-        )
-    }
-
-    func openFullDiskAccessSettings() {
-        NSWorkspace.shared.open(OpenClickyMacPrivacyPermissionProbe.fullDiskAccessSettingsURL)
-    }
-
-    func openAutomationSettings() {
-        NSWorkspace.shared.open(OpenClickyMacPrivacyPermissionProbe.automationSettingsURL)
-    }
-
-    func requestRemindersAutomationPermission() {
-        OpenClickyMessageLogStore.shared.append(
-            lane: "computer-use",
-            direction: "outgoing",
-            event: "native_cua.automation_probe.started",
-            fields: [
-                "target": "Reminders"
-            ]
-        )
-
-        Task.detached(priority: .userInitiated) {
-            let result = OpenClickyLocalAutomationRunner.runAppleScript("""
-            tell application "Reminders"
-                count reminders
-            end tell
-            """)
-
-            await MainActor.run {
-                if result.terminationStatus == 0 {
-                    OpenClickyMessageLogStore.shared.append(
-                        lane: "computer-use",
-                        direction: "outgoing",
-                        event: "native_cua.automation_probe.ready",
-                        fields: [
-                            "target": "Reminders"
-                        ]
-                    )
-                    self.showShortSystemResponse("Reminders automation is ready.")
-                } else {
-                    OpenClickyMessageLogStore.shared.append(
-                        lane: "computer-use",
-                        direction: "error",
-                        event: "native_cua.automation_probe.blocked",
-                        fields: [
-                            "target": "Reminders",
-                            "error": result.errorOutput.isEmpty ? result.output : result.errorOutput
-                        ]
-                    )
-                    self.openAutomationSettings()
-                    self.showShortSystemResponse(Self.nativeAutomationErrorMessage(appName: "Reminders", result: result))
-                }
-            }
-        }
-    }
-
-    func requestSystemEventsAutomationPermission() {
-        OpenClickyMessageLogStore.shared.append(
-            lane: "computer-use",
-            direction: "outgoing",
-            event: "native_cua.automation_probe.started",
-            fields: [
-                "target": "System Events"
-            ]
-        )
-
-        let isGranted = OpenClickyMacPrivacyPermissionProbe.hasSystemEventsAutomationPermission(prompt: true)
-        hasSystemEventsAutomationPermission = isGranted
-
-        if isGranted {
-            OpenClickyMessageLogStore.shared.append(
-                lane: "computer-use",
-                direction: "outgoing",
-                event: "native_cua.automation_probe.ready",
-                fields: [
-                    "target": "System Events"
-                ]
-            )
-            showShortSystemResponse("System Events automation is ready.")
-        } else {
-            OpenClickyMessageLogStore.shared.append(
-                lane: "computer-use",
-                direction: "error",
-                event: "native_cua.automation_probe.blocked",
-                fields: [
-                    "target": "System Events",
-                    "error": "Automation permission is missing or denied for com.apple.systemevents"
-                ]
-            )
-            openAutomationSettings()
-            showShortSystemResponse("System Events automation needs approval in Privacy & Security, Automation.")
-        }
-    }
-
-    func showSettingsWindow() {
-        settingsWindowManager.show(companionManager: self)
-    }
-
-    func showLogViewerWindow() {
-        logViewerWindowManager.show()
-    }
-
-    func openOpenClickyDocument(_ url: URL) {
-        let standardizedURL = url.standardizedFileURL
-        if Self.isMarkdownDocument(standardizedURL) {
-            markdownViewerWindowManager.show(fileURL: standardizedURL)
-        } else {
-            NSWorkspace.shared.open(standardizedURL)
-        }
-    }
-
-    func handleApplicationOpenURL(_ url: URL) {
-        if url.isFileURL {
-            openOpenClickyDocument(url)
-            return
-        }
-
-        handleOpenClickyDeepLink(url)
-    }
-
-    /// Refreshes the menu bar task status after task or reply changes.
-    func scheduleStatusSync() {
-        agentMenuBarStatusManager.scheduleSync(companionManager: self)
-    }
-
-    func handleOpenClickyDeepLink(_ url: URL) {
-        guard url.scheme == "openclicky" else { return }
-
-        switch url.host {
-        case "agents":
-            showCodexHUD()
-        case "agent":
-            if let sessionIDString = url.pathComponents.dropFirst().first,
-               let sessionID = UUID(uuidString: sessionIDString) {
-                selectCodexAgentSession(sessionID)
-            }
-            showCodexHUD()
-        case "settings":
-            showSettingsWindow()
-        case "logs":
-            showLogViewerWindow()
-        case "memory":
-            showMemoryWindow()
-        default:
-            showSettingsWindow()
-        }
-    }
-
-    func setTutorModeEnabled(_ enabled: Bool) {
-        isTutorModeEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: Self.tutorModeDefaultsKey)
-        if enabled {
-            showCursorOverlayIfAvailable()
-            if runtimeMode == .menuBar {
-                startTutorIdleObservation()
-            }
-        } else {
-            stopTutorIdleObservation()
-        }
-    }
-
-    func setAdvancedModeEnabled(_ enabled: Bool) {
-        isAdvancedModeEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: AppBundleConfiguration.userAdvancedModeDefaultsKey)
-        if !enabled {
-            codexHUDWindowManager.hide()
-        }
-    }
-
-    func setAnthropicAPIKey(_ apiKey: String) {
-        persistOptionalSecret(apiKey, defaultsKey: AppBundleConfiguration.userAnthropicAPIKeyDefaultsKey)
-        claudeAPI.setAPIKey(AppBundleConfiguration.anthropicAPIKey())
-    }
-
-    func setVoiceTranscriptionProvider(_ providerID: String) {
-        buddyDictationManager.setTranscriptionProvider(providerID)
-    }
-
-    func setCodexAgentAPIKey(_ apiKey: String) {
-        persistOptionalSecret(apiKey, defaultsKey: AppBundleConfiguration.userCodexAgentAPIKeyDefaultsKey)
-        openAIAPI.setAPIKey(AppBundleConfiguration.openAIAPIKey())
-        codexAgentSessions.forEach { $0.stop(reason: "api_key_reconfigured") }
-    }
-
-    private func persistOptionalSecret(_ value: String, defaultsKey: String) {
-        AppBundleConfiguration.persistSecret(value, defaultsKey: defaultsKey)
-    }
+    var agentDockFollowTimer: Timer?
 
     /// User preference for whether the OpenClicky cursor should be shown.
     /// When toggled off, the overlay is hidden and push-to-talk is disabled.
@@ -1599,32 +926,6 @@ final class CompanionManager: ObservableObject {
         : UserDefaults.standard.bool(forKey: "isClickyCursorEnabled")
 
     @Published var isActivationShortcutEnabled: Bool = true
-    func setClickyCursorEnabled(_ enabled: Bool) {
-        isClickyCursorEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: "isClickyCursorEnabled")
-        transientHideTask?.cancel()
-        transientHideTask = nil
-
-        if enabled {
-            showCursorOverlayIfAvailable()
-        } else {
-            overlayWindowManager.hideOverlay()
-            isOverlayVisible = false
-        }
-    }
-
-    func setActivationShortcutEnabled(_ enabled: Bool) {
-        isActivationShortcutEnabled = enabled
-        globalPushToTalkShortcutMonitor.setActivationShortcutEnabled(enabled)
-    }
-
-    /// Whether the user has completed onboarding at least once. Persisted
-    /// to UserDefaults so the Start button only appears on first launch.
-    var hasCompletedOnboarding: Bool {
-        get { UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") }
-        set { UserDefaults.standard.set(newValue, forKey: "hasCompletedOnboarding") }
-    }
-
     func start() {
         loadBundledKnowledgeIndex()
         refreshAllPermissions()
@@ -1849,7 +1150,6 @@ final class CompanionManager: ObservableObject {
         )
         return Self.clampedExternalCursorPoint(approximateDockIconCenter)
     }
-
 
     private static func clampedExternalCursorPoint(_ point: CGPoint) -> CGPoint {
         NSScreen.pointClampedToDesktop(point)
@@ -3026,7 +2326,7 @@ final class CompanionManager: ObservableObject {
         showShortSystemResponse("\(session.spokenAgentSentenceName) says it found \(Self.spokenFileName(for: standardizedURL)), showing it now.")
     }
 
-    private static func isMarkdownDocument(_ url: URL) -> Bool {
+    static func isMarkdownDocument(_ url: URL) -> Bool {
         ["md", "markdown", "mdown", "mkd"].contains(url.pathExtension.lowercased())
     }
 
@@ -3197,202 +2497,6 @@ final class CompanionManager: ObservableObject {
         )
         scheduleStatusSync()
         persistRelaunchableAgentSessions()
-    }
-
-    func beginRequestTiming(source: String, text: String) -> OpenClickyRequestTiming {
-        let timing = OpenClickyRequestTiming(
-            requestID: UUID().uuidString,
-            source: source,
-            text: text,
-            requestedAt: Date()
-        )
-        OpenClickyMessageLogStore.shared.append(
-            lane: "request",
-            direction: "incoming",
-            event: "openclicky.request.received",
-            fields: requestTimingFields(
-                timing,
-                extra: [
-                    "textLength": text.count,
-                    "textPreview": Self.truncatedLogText(text, maxLength: 240)
-                ]
-            )
-        )
-        return timing
-    }
-
-    private func withActiveRequestTiming<T>(_ timing: OpenClickyRequestTiming, perform work: () -> T) -> T {
-        let previousTiming = activeRequestTiming
-        activeRequestTiming = timing
-        defer { activeRequestTiming = previousTiming }
-        return work()
-    }
-
-    func markRequestExecutionStarted(
-        route: String,
-        timing: OpenClickyRequestTiming? = nil,
-        extra: [String: Any] = [:]
-    ) -> Date {
-        let startedAt = Date()
-        var fields = extra
-        fields["executionStartedAt"] = startedAt
-        OpenClickyMessageLogStore.shared.append(
-            lane: "request",
-            direction: "outgoing",
-            event: "openclicky.request.execution_started",
-            fields: requestTimingFields(
-                timing ?? activeRequestTiming,
-                route: route,
-                at: startedAt,
-                extra: fields
-            )
-        )
-        return startedAt
-    }
-
-    func markRequestStageCompleted(
-        route: String,
-        stage: String,
-        stageStartedAt: Date,
-        timing: OpenClickyRequestTiming? = nil,
-        status: String = "success",
-        extra: [String: Any] = [:]
-    ) {
-        let completedAt = Date()
-        var fields = extra
-        fields["stage"] = stage
-        fields["status"] = status
-        fields["stageStartedAt"] = stageStartedAt
-        fields["stageCompletedAt"] = completedAt
-        fields["stageDurationMs"] = Self.elapsedMilliseconds(from: stageStartedAt, to: completedAt)
-        OpenClickyMessageLogStore.shared.append(
-            lane: "request",
-            direction: "outgoing",
-            event: "openclicky.request.stage_completed",
-            fields: requestTimingFields(
-                timing ?? activeRequestTiming,
-                route: route,
-                status: status,
-                at: completedAt,
-                extra: fields
-            )
-        )
-    }
-
-    func markRequestCompleted(
-        route: String,
-        executionStartedAt: Date? = nil,
-        timing: OpenClickyRequestTiming? = nil,
-        status: String = "success",
-        extra: [String: Any] = [:]
-    ) {
-        let completedAt = Date()
-        var fields = extra
-        fields["status"] = status
-        fields["completedAt"] = completedAt
-        if let executionStartedAt {
-            fields["executionStartedAt"] = executionStartedAt
-            fields["executionDurationMs"] = Self.elapsedMilliseconds(from: executionStartedAt, to: completedAt)
-        }
-        OpenClickyMessageLogStore.shared.append(
-            lane: "request",
-            direction: status == "success" ? "outgoing" : "error",
-            event: "openclicky.request.completed",
-            fields: requestTimingFields(
-                timing ?? activeRequestTiming,
-                route: route,
-                status: status,
-                at: completedAt,
-                extra: fields
-            )
-        )
-    }
-
-    private func requestTimingFields(
-        _ timing: OpenClickyRequestTiming?,
-        route: String? = nil,
-        status: String? = nil,
-        at: Date = Date(),
-        extra: [String: Any] = [:]
-    ) -> [String: Any] {
-        var fields = extra
-        fields["timingEventAt"] = at
-        if let route {
-            fields["route"] = route
-        }
-        if let status {
-            fields["status"] = status
-        }
-        guard let timing else {
-            fields["requestID"] = "none"
-            return fields
-        }
-
-        fields["requestID"] = timing.requestID
-        fields["requestSource"] = timing.source
-        fields["requestReceivedAt"] = timing.requestedAt
-        fields["requestAgeMs"] = Self.elapsedMilliseconds(from: timing.requestedAt, to: at)
-        return fields
-    }
-
-    private static func elapsedMilliseconds(from start: Date, to end: Date) -> Int {
-        max(0, Int((end.timeIntervalSince(start) * 1000).rounded()))
-    }
-
-    private static func elapsedMilliseconds(since startDate: Date?) -> Int {
-        guard let startDate else { return -1 }
-        return elapsedMilliseconds(from: startDate, to: Date())
-    }
-
-    static func voiceResponseCompletionAudioPlaybackState(
-        spokenText: String,
-        playbackFinished: Bool,
-        audioStarted: Bool = true
-    ) -> String {
-        guard !spokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return "empty"
-        }
-        // A TTS session whose engine was torn down still resolves finish()
-        // successfully — "finished" is only honest if audio actually
-        // reached the speaker.
-        guard audioStarted else {
-            return "never_started"
-        }
-        return playbackFinished ? "finished" : "interrupted"
-    }
-
-    private static func truncatedLogText(_ value: String, maxLength: Int) -> String {
-        let flattened = value
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-        guard flattened.count > maxLength else { return flattened }
-        return String(flattened.prefix(maxLength))
-    }
-
-    func voiceResponseExecutionFields(effectiveModelID: String? = nil) -> [String: Any] {
-        let selectedVoiceResponseModel = OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel)
-        let executionModel = effectiveModelID.map { OpenClickyModelCatalog.voiceResponseModel(withID: $0) }
-            ?? selectedVoiceResponseModel
-        var fields: [String: Any] = [
-            "executor": "voice_response",
-            "model": executionModel.id,
-            "modelProvider": executionModel.provider.rawValue,
-            "maxOutputTokens": executionModel.maxOutputTokens
-        ]
-
-        if executionModel.id != selectedVoiceResponseModel.id {
-            fields["selectedVoiceResponseModel"] = selectedVoiceResponseModel.id
-            fields["visualAnalysisModel"] = executionModel.id
-        }
-
-        // Reports the provider that will actually answer, in fallback order.
-        let available = answerProviders.chain(for: executionModel).filter(\.isAvailable)
-        fields["provider"] = available.first?.id ?? "none"
-        fields["billing"] = available.first.map { String(describing: $0.billing) } ?? "none"
-        fields["fallbackProviders"] = available.dropFirst().map(\.id).joined(separator: ",")
-
-        return fields
     }
 
     func dismissCoachingOverlays() {
@@ -3684,7 +2788,6 @@ final class CompanionManager: ObservableObject {
             return nil
         }
     }
-
 
     /// Fires from the processing watchdog when voiceState has been stuck
     /// at .processing for longer than processingWatchdogTimeout seconds.
@@ -6889,7 +5992,7 @@ final class CompanionManager: ObservableObject {
         submitTextModePrompt(text, allowsAgentRouting: false, attachesScreen: attachesScreen)
     }
 
-    private func saveCompactConversation() {
+    func saveCompactConversation() {
         companionConversations.update(entries: companionConversations.active.boundThreadID == nil ? homeChatEntries : Array(homeChatEntries.suffix(24)), summary: compactedVoiceConversationArchive)
         companionConversations.save()
     }
@@ -7689,7 +6792,6 @@ final class CompanionManager: ObservableObject {
     /// silently absorb every subsequent voice turn.
     // MARK: - Speculative pre-fire
 
-
     private static func isLikelyAgentFollowUpPhrasing(_ transcript: String) -> Bool {
         let normalized = transcript
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
@@ -8367,7 +7469,6 @@ final class CompanionManager: ObservableObject {
         return false
     }
 
-
     static func quickLocalVoiceResponseText(for transcript: String) -> String? {
         let candidate = normalizedQuickLocalVoiceResponseCandidate(from: transcript)
         guard !candidate.isEmpty else { return nil }
@@ -9003,8 +8104,7 @@ final class CompanionManager: ObservableObject {
         return directFolderPrefixes.contains { normalized.hasPrefix($0) }
     }
 
-
-    private static func isReferentialAgentInstruction(_ instruction: String) -> Bool {
+    static func isReferentialAgentInstruction(_ instruction: String) -> Bool {
         let normalized = SpokenText.normalizedSpokenCommandText(instruction)
         guard !normalized.isEmpty else { return false }
 
@@ -9239,7 +8339,6 @@ final class CompanionManager: ObservableObject {
 
         return false
     }
-
 
     private static func isAgentTaskPlaceholderInstruction(_ instruction: String) -> Bool {
         let normalized = instruction
@@ -10460,7 +9559,6 @@ final class CompanionManager: ObservableObject {
         return SpokenText.cleanedAgentTaskInstruction(instruction)
     }
 
-
     static func hybridAgentTaskInstruction(from transcript: String) -> String? {
         let candidate = SpokenText.normalizedCommandCandidate(from: transcript)
         let normalized = SpokenText.normalizedSpokenCommandText(candidate)
@@ -10831,7 +9929,6 @@ final class CompanionManager: ObservableObject {
         return regex.firstMatch(in: candidate, range: range) != nil
     }
 
-
     private static func cleanedApplicationOpenTarget(_ rawTarget: String) -> String {
         var target = rawTarget.trimmingCharacters(in: .whitespacesAndNewlines)
         let trailingActionPatterns = [
@@ -10962,7 +10059,7 @@ final class CompanionManager: ObservableObject {
         return ["", "someone", "somebody", "anyone", "people", "them", "him", "her"].contains(normalized)
     }
 
-    private static func nativeAutomationErrorMessage(
+    static func nativeAutomationErrorMessage(
         appName: String,
         result: OpenClickyLocalAutomationResult
     ) -> String {
@@ -11889,7 +10986,7 @@ final class CompanionManager: ObservableObject {
     /// Record silent/hybrid agent launches as real voice context so the
     /// primary voice conversation can answer follow-ups like “what were we
     /// talking about?” and “get an agent on it” without losing the topic.
-    private static func agentHandoffVoiceContextResponse(instruction: String) -> String {
+    static func agentHandoffVoiceContextResponse(instruction: String) -> String {
         let snippet = voiceArchiveSnippet(instruction, limit: 180)
         return "OpenClicky started a background agent for: \(snippet). Keep this as part of the current voice conversation context."
     }
@@ -13044,7 +12141,7 @@ final class CompanionManager: ObservableObject {
     /// Keeps chat-driven turns aligned with the same corner-dock UX as
     /// voice starts: hoverable dock card and a quick buddy flight to the
     /// parking corner before returning to the user's cursor.
-    private func stageDashboardAgentSubmission(prompt: String, session: CodexAgentSession) {
+    func stageDashboardAgentSubmission(prompt: String, session: CodexAgentSession) {
         let summary = Self.shortAgentInstructionSummary(prompt)
         let activity = "Starting \(summary)"
         let screen = agentDockTargetScreen()
@@ -13509,7 +12606,7 @@ final class CompanionManager: ObservableObject {
         )
     }
 
-    private func showAgentDockWindowNearCurrentScreen() {
+    func showAgentDockWindowNearCurrentScreen() {
         let mouseLocation = NSEvent.mouseLocation
         let targetScreen = NSScreen.screen(containingOrNearestTo: mouseLocation)
         guard let targetScreen else { return }
@@ -13608,7 +12705,7 @@ final class CompanionManager: ObservableObject {
     }
 
     /// Shows a short system message (confirmation, prompt, or announcement) in the pointer bubble.
-    private func showShortSystemResponse(
+    func showShortSystemResponse(
         _ text: String,
         interruptExisting: Bool = true,
         route: String? = nil,
@@ -13874,7 +12971,6 @@ final class CompanionManager: ObservableObject {
         """
     }
 
-
     func currentTutorModeSystemPrompt() -> String {
         """
         \(Self.tutorModeSystemPrompt)
@@ -13905,7 +13001,6 @@ final class CompanionManager: ObservableObject {
     the screenshot labels include pixel dimensions. use those dimensions as the coordinate space. origin (0,0) is top-left. x increases rightward, y increases downward.
     if a screen number is present in the image label and the target is not the primary screen, append :screenN.
     """
-
 
 }
 
