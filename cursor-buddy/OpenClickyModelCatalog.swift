@@ -6,6 +6,8 @@ nonisolated enum OpenClickyModelProvider: String, Equatable {
     case openAI
     case codex
     case deepgram
+    /// A user-configured command-line tool; see `CommandLineProviderConfig`.
+    case commandLine
 
     var displayName: String {
         switch self {
@@ -19,6 +21,8 @@ nonisolated enum OpenClickyModelProvider: String, Equatable {
             return "Codex"
         case .deepgram:
             return "Deepgram"
+        case .commandLine:
+            return "Command line"
         }
     }
 
@@ -34,7 +38,7 @@ nonisolated enum OpenClickyModelProvider: String, Equatable {
             return .codex
         case .openAI:
             return .codex
-        case .deepgram:
+        case .deepgram, .commandLine:
             return nil
         }
     }
@@ -119,7 +123,12 @@ nonisolated enum OpenClickyModelCatalog {
         return voiceResponseModel(withID: defaultDelegationModelID)
     }
 
-    static let voiceResponseModels: [OpenClickyModelOption] = [
+    /// Command-line tools from the user's configuration file, read once at launch.
+    static let commandLineModels: [OpenClickyModelOption] = CommandLineProviderConfig.load().map(\.modelOption)
+
+    static let voiceResponseModels: [OpenClickyModelOption] = builtInVoiceResponseModels + commandLineModels
+
+    static let builtInVoiceResponseModels: [OpenClickyModelOption] = [
         // Voice turns should still be concise by prompt, but never by a
         // hard generation ceiling. Long spoken explanations can stream
         // sentence-by-sentence through TTS without being cut off.

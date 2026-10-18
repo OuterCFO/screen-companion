@@ -1107,219 +1107,26 @@ extension CompanionManager {
         onTextChunk: @MainActor @Sendable @escaping (String) -> Void
     ) async throws -> String {
         if let threadID = boundCodexThreadID {
-            if let sessionID = ClaudeCodeCLIProtocol.sessionID(fromLinkedThreadID: threadID) {
-                return try await claudeCodeSessionLink.submit(sessionID: sessionID, prompt: userPrompt,
-                    images: images, onTextChunk: onTextChunk)
-            }
-            return try await sharedCodexSession.submit(threadID: threadID, prompt: userPrompt,
-                images: images, onTextChunk: onTextChunk)
+            return try await sessionLink(for: threadID).submit(threadID: threadID, prompt: userPrompt,
+                images: images, onText: onTextChunk)
         }
         let responseSystemPrompt = systemPrompt + "\n\n" + CursorResponseContract.instructions
         let requestedModelID = modelID ?? selectedModel
         let selectedVoiceResponseModel = OpenClickyModelCatalog.isSpeechModelID(requestedModelID)
             ? OpenClickyModelCatalog.voiceAnalysisModel(withID: requestedModelID)
             : OpenClickyModelCatalog.voiceResponseModel(withID: requestedModelID)
-        applyVoiceResponseModelSettings(selectedVoiceResponseModel)
-
-        switch selectedVoiceResponseModel.provider {
-        case .apple:
-            return try await AppleFoundationModelsVoiceClient.analyzeVoiceResponse(
-                images: images,
-                systemPrompt: responseSystemPrompt,
-                conversationHistory: conversationHistory,
-                userPrompt: userPrompt,
-                onTextChunk: onTextChunk
-            )
-        case .anthropic:
-            return try await analyzeClaudeResponse(
-                images: images,
-                model: selectedVoiceResponseModel.id,
-                systemPrompt: responseSystemPrompt,
-                conversationHistory: conversationHistory,
-                userPrompt: userPrompt,
-                assistantPrefill: nil, // Mandatory point-first format forbids a prose prefill.
-                onTextChunk: onTextChunk
-            )
-        case .openAI:
-            // OpenAI Responses API uses a different shape — assistant
-            // prefill is not supported the same way. The system-prompt
-            // directive carries the constraint here.
-            return try await analyzeOpenAIOrCodexVoiceResponse(
-                images: images,
-                model: selectedVoiceResponseModel.id,
-                systemPrompt: responseSystemPrompt,
-                conversationHistory: conversationHistory,
-                userPrompt: userPrompt,
-                onTextChunk: onTextChunk
-            )
-        case .deepgram:
+        guard selectedVoiceResponseModel.provider != .deepgram else {
             throw NSError(
                 domain: "DeepgramVoiceAgentClient",
                 code: -20,
                 userInfo: [NSLocalizedDescriptionKey: "Deepgram Voice Agent handles live microphone turns directly; text/screenshot fallback should route through a normal response model."]
             )
-        case .codex:
-            return try await analyzeCodexVoiceResponse(
-                images: images,
-                model: selectedVoiceResponseModel.id,
-                systemPrompt: responseSystemPrompt,
-                conversationHistory: conversationHistory,
-                userPrompt: userPrompt,
-                onTextChunk: onTextChunk
-            )
         }
-    }
-
-    private func analyzeClaudeResponse(
-        images: [(data: Data, label: String)],
-        model: String,
-        systemPrompt: String,
-        conversationHistory: [(userPlaceholder: String, assistantResponse: String)] = [],
-        userPrompt: String,
-        assistantPrefill: String? = nil,
-        onTextChunk: @MainActor @Sendable @escaping (String) -> Void
-    ) async throws -> String {
-        // Inference routing rule: Claude Code CLI FIRST (uses the local
-        // Claude Code sign-in the user already pays for), direct ClaudeAPI
-        // HTTP only as fallback when the CLI is unavailable or throws.
-        // Never short-circuit to HTTP for latency or capability reasons —
-        // direct REST bills per token on the user's card.
-        print("🧠 analyzeClaudeResponse: model=\(model) cliAvailable=\(claudeCodeCLI != nil) httpKey=\(AppBundleConfiguration.anthropicAPIKey() != nil) prefill=\(assistantPrefill?.isEmpty == false)")
-        let modelOption = OpenClickyModelCatalog.voiceResponseModel(withID: model)
-
-        if let claudeCodeCLI {
-            do {
-                claudeCodeCLI.model = modelOption.id
-                claudeCodeCLI.maxOutputTokens = modelOption.maxOutputTokens
-                print("🧠 analyzeClaudeResponse: using Claude Code CLI")
-                let (text, _) = try await claudeCodeCLI.analyzeImageStreaming(
-                    images: images,
-                    systemPrompt: systemPrompt,
-                    conversationHistory: conversationHistory,
-                    userPrompt: userPrompt,
-                    // The CLI cannot prefill; this format-sensitive path passes nil anyway.
-                    assistantPrefill: assistantPrefill,
-                    onTextChunk: onTextChunk
-                )
-                return text
-            } catch is CancellationError {
-                // Cancellation means the user interrupted the primary CLI path;
-                // it is not an availability failure and must never trigger a
-                // paid direct-HTTP fallback.
-                throw CancellationError()
-            } catch {
-                guard AppBundleConfiguration.anthropicAPIKey() != nil else { throw error }
-                OpenClickyMessageLogStore.shared.append(
-                    lane: "voice",
-                    direction: "error",
-                    event: "voice.response_fallback",
-                    fields: [
-                        "from": "claude_code_cli",
-                        "to": "anthropic_api_key",
-                        "error": error.localizedDescription
-                    ]
-                )
-                print("🔁 analyzeClaudeResponse: Claude Code CLI failed, falling back to direct HTTP: \(error.localizedDescription)")
-            }
-        }
-
-        if AppBundleConfiguration.anthropicAPIKey() != nil {
-            claudeAPI.model = modelOption.id
-            claudeAPI.maxOutputTokens = modelOption.maxOutputTokens
-            print("🧠 analyzeClaudeResponse: using direct HTTP streaming (ClaudeAPI fallback)")
-            let (text, _) = try await claudeAPI.analyzeImageStreaming(
-                images: images,
-                systemPrompt: systemPrompt,
-                conversationHistory: conversationHistory,
-                userPrompt: userPrompt,
-                assistantPrefill: assistantPrefill,
-                onTextChunk: onTextChunk
-            )
-            return text
-        }
-
-        print("❌ analyzeClaudeResponse: no SDK and no HTTP key — Claude not configured")
-        throw NSError(
-            domain: "ClaudeCodeCLIClient",
-            code: -1,
-            userInfo: [NSLocalizedDescriptionKey: "Claude is not configured. Sign in to Claude Code locally or set an Anthropic API key."]
-        )
-    }
-
-    private func analyzeOpenAIOrCodexVoiceResponse(
-        images: [(data: Data, label: String)],
-        model: String,
-        systemPrompt: String,
-        conversationHistory: [(userPlaceholder: String, assistantResponse: String)] = [],
-        userPrompt: String,
-        onTextChunk: @MainActor @Sendable @escaping (String) -> Void
-    ) async throws -> String {
-        let modelOption = OpenClickyModelCatalog.voiceAnalysisModel(withID: model)
-        if !OpenClickyModelCatalog.isSpeechModelID(modelOption.id) {
-            do {
-                return try await analyzeCodexVoiceResponse(
-                    images: images,
-                    model: modelOption.id,
-                    systemPrompt: systemPrompt,
-                    conversationHistory: conversationHistory,
-                    userPrompt: userPrompt,
-                    onTextChunk: onTextChunk
-                )
-            } catch {
-                guard AppBundleConfiguration.openAIAPIKey() != nil else { throw error }
-                OpenClickyMessageLogStore.shared.append(
-                    lane: "voice",
-                    direction: "error",
-                    event: "voice.response_fallback",
-                    fields: [
-                        "from": "codex_voice_session",
-                        "to": "openai_api_key",
-                        "model": modelOption.id,
-                        "codexModel": OpenClickyModelCatalog.codexVoiceSessionModel(withID: modelOption.id).id,
-                        "error": error.localizedDescription
-                    ]
-                )
-            }
-        }
-
-        guard AppBundleConfiguration.openAIAPIKey() != nil else {
-            throw NSError(
-                domain: "OpenAIAPI",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "OpenAI is not configured for this voice analysis request."]
-            )
-        }
-
-        openAIAPI.model = modelOption.id
-        openAIAPI.maxOutputTokens = modelOption.maxOutputTokens
-        let (text, _) = try await openAIAPI.analyzeImageStreaming(
-            images: images,
-            systemPrompt: systemPrompt,
-            conversationHistory: conversationHistory,
-            userPrompt: userPrompt,
-            onTextChunk: onTextChunk
-        )
-        return text
-    }
-
-    private func analyzeCodexVoiceResponse(
-        images: [(data: Data, label: String)],
-        model: String,
-        systemPrompt: String,
-        conversationHistory: [(userPlaceholder: String, assistantResponse: String)] = [],
-        userPrompt: String,
-        onTextChunk: @MainActor @Sendable @escaping (String) -> Void
-    ) async throws -> String {
-        let modelOption = OpenClickyModelCatalog.codexVoiceSessionModel(withID: model)
-        codexVoiceSession.model = modelOption.id
-        let (text, _) = try await codexVoiceSession.analyzeImageStreaming(
-            images: images,
-            systemPrompt: systemPrompt,
-            conversationHistory: conversationHistory,
-            userPrompt: userPrompt,
-            onTextChunk: onTextChunk
-        )
-        return text
+        return try await answerProviders.answer(AnswerRequest(
+            model: selectedVoiceResponseModel, images: images, systemPrompt: responseSystemPrompt,
+            history: conversationHistory, prompt: userPrompt,
+            assistantPrefill: nil // Mandatory point-first format forbids a prose prefill.
+        ), onText: onTextChunk)
     }
 
     private static func shouldUsePreResponseFiller(
@@ -1599,13 +1406,10 @@ extension CompanionManager {
             )
             return text
         case .anthropicAPI:
-            return try await analyzeClaudeResponse(
-                images: [image],
-                model: selectedPointingModel.id,
-                systemPrompt: systemPrompt,
-                userPrompt: userPrompt,
-                onTextChunk: onTextChunk
-            )
+            return try await answerProviders.answer(AnswerRequest(
+                model: selectedPointingModel, images: [image], systemPrompt: systemPrompt,
+                history: [], prompt: userPrompt, assistantPrefill: nil
+            ), onText: onTextChunk)
         case .codexCLI:
             let detector = CodexPointDetector(model: selectedPointingModel.id)
             let text = try await detector.detectPointTag(
@@ -1653,7 +1457,7 @@ extension CompanionManager {
             return .codexCLI
         case .openAI:
             return .openAIResponses
-        case .apple, .deepgram:
+        case .apple, .deepgram, .commandLine:
             return .unsupported
         }
     }
@@ -1697,7 +1501,7 @@ extension CompanionManager {
                 displayWidthInPoints: targetScreenCapture.displayWidthInPoints,
                 displayHeightInPoints: targetScreenCapture.displayHeightInPoints
             )
-        case .apple, .openAI, .deepgram:
+        case .apple, .openAI, .deepgram, .commandLine:
             return
         }
 

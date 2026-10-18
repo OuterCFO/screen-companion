@@ -669,6 +669,13 @@ final class CompanionManager: ObservableObject {
         )
     }()
 
+    /// Every text answer goes through these provider chains; see `AnswerProviders.swift`.
+    lazy var answerProviders: AnswerProviderRegistry = .standard(
+        claudeCode: { [unowned self] in self.claudeCodeCLI },
+        anthropicAPI: { [unowned self] in self.claudeAPI },
+        codex: { [unowned self] in self.codexVoiceSession },
+        openAIAPI: { [unowned self] in self.openAIAPI })
+
     lazy var claudeCodeCLI: ClaudeCodeCLIClient? = {
         let modelOption = OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel)
         return ClaudeCodeCLIClient(model: modelOption.id, maxOutputTokens: modelOption.maxOutputTokens)
@@ -1867,19 +1874,10 @@ final class CompanionManager: ObservableObject {
         }
 
         applyVoiceResponseModelSettings(selectedVoiceResponseModel)
-        switch selectedVoiceResponseModel.provider {
-        case .apple:
-            // On-device — nothing to warm.
-            break
-        case .anthropic:
-            // The CLI is the primary Claude path; pre-start its next process.
-            claudeCodeCLI?.warmUp(systemPrompt: currentVoiceResponseSystemPrompt())
-        case .openAI, .codex:
-            if selectedVoiceResponseModel.provider == .codex || AppBundleConfiguration.openAIAPIKey() == nil {
-                codexVoiceSession.warmUp(systemPrompt: currentVoiceResponseSystemPrompt())
-            }
-        case .deepgram:
+        if selectedVoiceResponseModel.provider == .deepgram {
             deepgramVoiceAgentClient.warmUpConnection()
+        } else {
+            answerProviders.warmUp(for: selectedVoiceResponseModel, systemPrompt: currentVoiceResponseSystemPrompt())
         }
     }
 
@@ -1910,28 +1908,15 @@ final class CompanionManager: ObservableObject {
     }
 
     func applyVoiceResponseModelSettings(_ modelOption: OpenClickyModelOption) {
-        switch modelOption.provider {
-        case .apple:
-            break
-        case .anthropic:
-            claudeAPI.model = modelOption.id
-            claudeAPI.maxOutputTokens = modelOption.maxOutputTokens
-            claudeCodeCLI?.model = modelOption.id
-            claudeCodeCLI?.maxOutputTokens = modelOption.maxOutputTokens
-        case .openAI:
-            let analysisModel = OpenClickyModelCatalog.voiceAnalysisModel(withID: modelOption.id)
-            openAIAPI.model = analysisModel.id
-            openAIAPI.maxOutputTokens = analysisModel.maxOutputTokens
-            codexVoiceSession.model = OpenClickyModelCatalog.codexVoiceSessionModel(withID: analysisModel.id).id
-        case .codex:
-            codexVoiceSession.model = OpenClickyModelCatalog.codexVoiceSessionModel(withID: modelOption.id).id
-        case .deepgram:
-            deepgramVoiceAgentClient.updateConfiguration(
-                apiKey: AppBundleConfiguration.deepgramAPIKey(),
-                voiceID: AppBundleConfiguration.deepgramTTSVoice(),
-                thinkModel: AppBundleConfiguration.deepgramVoiceAgentThinkModel()
-            )
+        guard modelOption.provider == .deepgram else {
+            for provider in answerProviders.chain(for: modelOption) where provider.isAvailable { provider.prepare(for: modelOption) }
+            return
         }
+        deepgramVoiceAgentClient.updateConfiguration(
+            apiKey: AppBundleConfiguration.deepgramAPIKey(),
+            voiceID: AppBundleConfiguration.deepgramTTSVoice(),
+            thinkModel: AppBundleConfiguration.deepgramVoiceAgentThinkModel()
+        )
     }
 
     func setSelectedComputerUseBackend(_ backendID: String) {
@@ -2331,20 +2316,6 @@ final class CompanionManager: ObservableObject {
         }
         let selectedVoiceResponseModel = OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel)
         switch selectedVoiceResponseModel.provider {
-        case .apple:
-            break
-        case .anthropic:
-            // The CLI is the primary Claude path; pre-start its next process.
-            if let claudeCodeCLI {
-                claudeCodeCLI.warmUp(systemPrompt: currentVoiceResponseSystemPrompt())
-            }
-            // Pre-init the HTTP ClaudeAPI client as fallback-only TLS warm-up
-            // when a key is present. Its initializer kicks off a background
-            // HEAD to api.anthropic.com which caches the TLS session ticket,
-            // so a fallback request avoids the ~150-300ms cold-handshake tax.
-            if AppBundleConfiguration.anthropicAPIKey() != nil {
-                _ = claudeAPI
-            }
         case .openAI where OpenClickyModelCatalog.isSpeechModelID(selectedVoiceResponseModel.id):
             selectedSpeechModel = selectedVoiceResponseModel.id
             openAIRealtimeSpeechClient.model = selectedVoiceResponseModel.id
@@ -2362,11 +2333,8 @@ final class CompanionManager: ObservableObject {
                 thinkModel: AppBundleConfiguration.deepgramVoiceAgentThinkModel()
             )
             deepgramVoiceAgentClient.warmUpConnection()
-        case .openAI, .codex:
-            codexVoiceSession.model = selectedVoiceResponseModel.id
-            if selectedVoiceResponseModel.provider == .codex || AppBundleConfiguration.openAIAPIKey() == nil {
-                codexVoiceSession.warmUp(systemPrompt: currentVoiceResponseSystemPrompt())
-            }
+        default:
+            answerProviders.warmUp(for: selectedVoiceResponseModel, systemPrompt: currentVoiceResponseSystemPrompt())
         }
         // Force-init the active TTS provider and prime its TLS
         // handshake. The first sentence's TTS request would otherwise
@@ -4295,56 +4263,16 @@ final class CompanionManager: ObservableObject {
             fields["realtimeVisualPathOverride"] = OpenClickyModelCatalog.isSpeechModelID(selectedVoiceResponseModel.id)
         }
 
-        switch executionModel.provider {
-        case .apple:
-            fields["executionMethod"] = "AppleFoundationModelsVoiceClient.analyzeVoiceResponse"
-            fields["authMode"] = "apple_foundation_models"
-            fields["transport"] = "on_device"
-            fields["streamingMethod"] = "language_model_session_respond"
-            fields["provider"] = "apple_foundation_models"
-        case .anthropic:
-            if AppBundleConfiguration.anthropicAPIKey() != nil {
-                fields["executionMethod"] = "ClaudeAPI.analyzeImageStreaming"
-                fields["authMode"] = "anthropic_api_key_primary"
-                fields["transport"] = "sse"
-                fields["streamingMethod"] = "URLSession.bytes"
-                fields["agentSDKFallbackAvailable"] = claudeCodeCLI != nil
-            } else if claudeCodeCLI != nil {
-                fields["executionMethod"] = "ClaudeCodeCLIClient.analyzeImageStreaming"
-                fields["authMode"] = "local_claude_code_cli_primary"
-                fields["transport"] = "agent_sdk_query"
-                fields["streamingMethod"] = "claude_code_cli_query"
-                fields["apiKeyFallback"] = false
-            } else {
-                fields["executionMethod"] = "ClaudeCodeCLIClient.analyzeImageStreaming"
-                fields["authMode"] = "local_claude_code_cli_missing"
-                fields["transport"] = "agent_sdk_query"
-                fields["streamingMethod"] = "claude_code_cli_query"
-            }
-        case .openAI:
-            if OpenClickyModelCatalog.isSpeechModelID(executionModel.id) {
-                fields["executionMethod"] = "OpenAIRealtimeSpeechClient.beginBidirectionalVoiceTurn"
-                fields["authMode"] = "openai_api_key_primary"
-                fields["transport"] = "realtime_websocket"
-                fields["streamingMethod"] = "input_audio_buffer.append + response.output_audio.delta"
-                fields["inputPath"] = "realtime_input_audio_buffer"
-                fields["bypassesWhisper"] = true
-                fields["playbackEngine"] = OpenClickyTTSProvider.openAIRealtime.rawValue
-                fields["speechModel"] = executionModel.id
-            } else if AppBundleConfiguration.openAIAPIKey() != nil {
-                fields["executionMethod"] = "OpenAIAPI.analyzeImageStreaming"
-                fields["authMode"] = "openai_api_key_primary"
-                fields["transport"] = "responses_api_sse"
-                fields["streamingMethod"] = "URLSession.bytes"
-                fields["codexFallbackAvailable"] = true
-            } else {
-                fields["executionMethod"] = "CodexVoiceSession.analyzeImageStreaming"
-                fields["authMode"] = "local_codex_chatgpt_primary"
-                fields["transport"] = "codex_app_server_stdio"
-                fields["streamingMethod"] = "codex_app_server_agentMessage_delta"
-                fields["apiKeyFallback"] = false
-            }
-        case .deepgram:
+        if OpenClickyModelCatalog.isSpeechModelID(executionModel.id) {
+            fields["executionMethod"] = "OpenAIRealtimeSpeechClient.beginBidirectionalVoiceTurn"
+            fields["authMode"] = "openai_api_key_primary"
+            fields["transport"] = "realtime_websocket"
+            fields["streamingMethod"] = "input_audio_buffer.append + response.output_audio.delta"
+            fields["inputPath"] = "realtime_input_audio_buffer"
+            fields["bypassesWhisper"] = true
+            fields["playbackEngine"] = OpenClickyTTSProvider.openAIRealtime.rawValue
+            fields["speechModel"] = executionModel.id
+        } else if executionModel.provider == .deepgram {
             fields["executionMethod"] = "DeepgramVoiceAgentClient.beginBidirectionalVoiceTurn"
             fields["authMode"] = "deepgram_api_key_primary"
             fields["transport"] = "deepgram_voice_agent_websocket"
@@ -4354,12 +4282,12 @@ final class CompanionManager: ObservableObject {
             fields["playbackEngine"] = "deepgram_voice_agent"
             fields["speechVoice"] = deepgramVoiceAgentClient.voiceID
             fields["thinkModel"] = deepgramVoiceAgentClient.thinkModel
-        case .codex:
-            fields["executionMethod"] = "CodexVoiceSession.analyzeImageStreaming"
-            fields["authMode"] = "local_codex_chatgpt_primary"
-            fields["transport"] = "codex_app_server_stdio"
-            fields["streamingMethod"] = "codex_app_server_agentMessage_delta"
-            fields["apiKeyFallback"] = AppBundleConfiguration.openAIAPIKey() != nil
+        } else {
+            // Reports the provider that will actually answer, in fallback order.
+            let available = answerProviders.chain(for: executionModel).filter(\.isAvailable)
+            fields["provider"] = available.first?.id ?? "none"
+            fields["billing"] = available.first.map { String(describing: $0.billing) } ?? "none"
+            fields["fallbackProviders"] = available.dropFirst().map(\.id).joined(separator: ",")
         }
 
         return fields
@@ -8756,65 +8684,60 @@ final class CompanionManager: ObservableObject {
     /// The linked Codex thread or Claude Code session (`claude:` prefix) of the selected compact task.
     var boundCodexThreadID: String? { compactInputAgentSessionID == nil ? companionConversations.active.boundThreadID : nil }
 
-    func linkedSessionTranscript(for threadID: String) async throws -> [CodexTranscriptEntry] {
-        if let sessionID = ClaudeCodeCLIProtocol.sessionID(fromLinkedThreadID: threadID) {
-            return try await claudeCodeSessionLink.transcript(for: sessionID)
+    /// Connect sources, shown in this order in the picker.
+    lazy var sessionLinks: [SessionLink] = [
+        CodexSessionLinkSource(client: { [unowned self] in self.sharedCodexSession }),
+        ClaudeCodeSessionLinkSource(link: claudeCodeSessionLink)
+    ]
+
+    func sessionLink(for threadID: String) throws -> SessionLink {
+        guard let link = sessionLinks.first(where: { $0.owns(threadID: threadID) }) else {
+            throw NSError(domain: "SessionLink", code: -1, userInfo: [NSLocalizedDescriptionKey: "This task's linked session type is not supported."])
         }
-        if sharedCodexSession.connectedThreadID != threadID { try await sharedCodexSession.connect(to: threadID) }
-        return try await sharedCodexSession.transcript(for: threadID)
+        return link
+    }
+
+    func linkedSessionTranscript(for threadID: String) async throws -> [CodexTranscriptEntry] {
+        try await sessionLink(for: threadID).transcript(threadID: threadID)
     }
 
     func showCodexSessionConnectionPicker() {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            // Each source is optional: Codex needs its shared server, Claude Code its local sessions.
-            let codexThreads = (try? await self.sharedCodexSession.listThreads()) ?? []
-            let claudeSessions = ClaudeCodeCLIProtocol.findExecutable() == nil ? [] : await self.claudeCodeSessionLink.listSessions()
-            enum Choice { case codex(SharedCodexThread), claude(SharedClaudeSession) }
-            let choices = codexThreads.filter(\.canConnect).map(Choice.codex) + claudeSessions.map(Choice.claude)
+            var choices: [(link: SessionLink, session: LinkableSession)] = []
+            for link in self.sessionLinks where link.isAvailable {
+                choices += await link.listSessions().map { (link, $0) }
+            }
             let alert = NSAlert()
             alert.messageText = "Connect cursor to a session"
             alert.informativeText = """
             Codex: live sessions on the shared Codex server. Claude Code: saved sessions, continued with --resume so each question and answer joins that session's history.
             The cursor uses the session's model and history. Claude Code turns can read files but not edit them. A Claude Code window that has the session open shows new turns after you resume it again.
             """
-            guard !choices.isEmpty else {
+            guard choices.contains(where: \.session.canConnect) else {
                 alert.informativeText = "No compatible session is available. Open a Codex session in the current terminal client, or start a Claude Code session and send it a message. Nothing was copied or changed."
                 alert.addButton(withTitle: "OK"); alert.runModal(); return
             }
+            // Connectable sessions first, keeping each source's own order.
+            choices = choices.filter(\.session.canConnect) + choices.filter { !$0.session.canConnect }
             let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 460, height: 28))
-            let relative = RelativeDateTimeFormatter()
             for choice in choices {
-                switch choice {
-                case .codex(let thread): picker.addItem(withTitle: "Codex: " + thread.title)
-                case .claude(let session):
-                    let folder = URL(fileURLWithPath: session.cwd).lastPathComponent
-                    let state = session.liveStatus.map { " · open (\($0))" } ?? ""
-                    picker.addItem(withTitle: "Claude Code: \(session.title) · \(folder) · " +
-                                   relative.localizedString(for: session.modifiedAt, relativeTo: Date()) + state)
-                }
-            }
-            for thread in codexThreads where !thread.canConnect {
-                picker.addItem(withTitle: "Codex: " + thread.title + " - unavailable")
-                picker.lastItem?.isEnabled = false
+                let detail = choice.session.detail.isEmpty ? "" : " · " + choice.session.detail
+                picker.addItem(withTitle: "\(choice.link.sourceName): \(choice.session.title)\(detail)")
+                picker.lastItem?.isEnabled = choice.session.canConnect
             }
             alert.accessoryView = picker
             alert.addButton(withTitle: "Connect"); alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn,
                   choices.indices.contains(picker.indexOfSelectedItem) else { return }
+            let chosen = choices[picker.indexOfSelectedItem]
             do {
-                let threadID: String, title: String
-                switch choices[picker.indexOfSelectedItem] {
-                case .codex(let thread):
-                    try await self.sharedCodexSession.connect(to: thread.id)
-                    threadID = thread.id; title = "Codex: " + thread.title
-                case .claude(let session):
-                    threadID = ClaudeCodeCLIProtocol.linkedThreadID(sessionID: session.id); title = "Claude Code: " + session.title
-                }
-                let entries = try await self.linkedSessionTranscript(for: threadID)
+                try await chosen.link.connect(threadID: chosen.session.threadID)
+                let entries = try await chosen.link.transcript(threadID: chosen.session.threadID)
                 self.dismissCoachingOverlays()
                 self.saveCompactConversation()
-                self.companionConversations.bind(threadID: threadID, title: title, entries: entries)
+                self.companionConversations.bind(threadID: chosen.session.threadID,
+                                                 title: chosen.link.sourceName + ": " + chosen.session.title, entries: entries)
                 self.activateCompactConversation()
                 self.showTutorConversation()
             } catch {

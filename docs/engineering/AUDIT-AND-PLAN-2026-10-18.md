@@ -66,12 +66,12 @@ The compact panel shares `OpenClickyNotchCaptureWindowManager.swift` with the no
 Each phase ends in a working build that the user installs and tests before the next phase starts.
 Checks per phase: source checks, the full-target typecheck, a native Xcode build, install, and a short live test.
 
-### Phase 0: New home
+### Phase 0: New home (done 18 October)
 
 1. Create a new public GitHub repository under a temporary name, with the full OpenClicky history, MIT license, and credit to Jason Kneen's OpenClicky.
 2. Point all further work there; OuterCFO/openclicky stays as it is.
 
-### Phase 1: Provider plug-ins
+### Phase 1: Provider plug-ins (implemented 18 October; awaiting native build and live test)
 
 1. Define one `AnswerProvider` interface: stream an answer from a prompt, screenshots, and recent history, and report capabilities (images, web search, sign-in source, cost model).
 2. Move the existing providers behind it: Claude Code CLI, Codex app-server, Apple on-device, OpenAI API, Anthropic API.

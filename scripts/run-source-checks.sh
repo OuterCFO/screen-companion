@@ -15,6 +15,7 @@ for target in cursor-buddy OpenClickyWidgets cursor-buddyTests; do
 done
 scripts/run-provider-catalog-tests.sh
 bash "$ROOT/scripts/run-claude-code-cli-tests.sh"
+bash "$ROOT/scripts/run-answer-provider-tests.sh"
 bash "$ROOT/scripts/run-companion-conversation-tests.sh"
 
 bash "$ROOT/scripts/run-reply-markdown-tests.sh"
