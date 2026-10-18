@@ -71,7 +71,7 @@ Checks per phase: source checks, the full-target typecheck, a native Xcode build
 1. Create a new public GitHub repository under a temporary name, with the full OpenClicky history, MIT license, and credit to Jason Kneen's OpenClicky.
 2. Point all further work there; OuterCFO/openclicky stays as it is.
 
-### Phase 1: Provider plug-ins (implemented 18 October; awaiting native build and live test)
+### Phase 1: Provider plug-ins (done 18 October; native build installed and live-tested)
 
 1. Define one `AnswerProvider` interface: stream an answer from a prompt, screenshots, and recent history, and report capabilities (images, web search, sign-in source, cost model).
 2. Move the existing providers behind it: Claude Code CLI, Codex app-server, Apple on-device, OpenAI API, Anthropic API.
