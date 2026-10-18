@@ -214,10 +214,6 @@ struct OpenClickySettingsView: View {
     @AppStorage(AppBundleConfiguration.userMCPCuaDriverCommandDefaultsKey) private var mcpCuaDriverCommand = CuaDriverMCPConfiguration.resolvedCommandPath() ?? ""
     @AppStorage(AppBundleConfiguration.userDesktopNotificationsEnabledDefaultsKey) private var desktopNotificationsEnabled = true
     @AppStorage(AppBundleConfiguration.userAgentCompletionVoiceEnabledDefaultsKey) private var agentCompletionVoiceEnabled = true
-    @AppStorage(AppBundleConfiguration.userWidgetsEnabledDefaultsKey) private var widgetsEnabled = true
-    @AppStorage(AppBundleConfiguration.userWidgetsIncludeAgentTaskNamesDefaultsKey) private var widgetsIncludeAgentTaskNames = true
-    @AppStorage(AppBundleConfiguration.userWidgetsIncludeMemorySnippetsDefaultsKey) private var widgetsIncludeMemorySnippets = true
-    @AppStorage(AppBundleConfiguration.userWidgetsIncludeFocusedAppContextDefaultsKey) private var widgetsIncludeFocusedAppContext = true
     @AppStorage(AppBundleConfiguration.userGlassOpacityDefaultsKey) private var glassOpacity = 0.75
     @AppStorage(AppBundleConfiguration.userGlassFrostingDefaultsKey) private var glassFrosting = 0.20
     @AppStorage(AppBundleConfiguration.userThemeDefaultsKey) private var clickyTheme = ClickyTheme.system.rawValue
@@ -443,7 +439,7 @@ struct OpenClickySettingsView: View {
         case .automations:
             return "Scheduled prompts and workflows. Interval (every N minutes) or 5-field cron, optionally bound to a specialist agent."
         case .connections:
-            return "Google Workspace, persistent memory folders, logs, widgets, and utilities."
+            return "Google Workspace, persistent memory folders, logs, and utilities."
         case .models:
             return "Offline model installs and the local inference runtime that gets models ready for use."
         }
@@ -2009,10 +2005,6 @@ struct OpenClickySettingsView: View {
                 }
                 actionRow(title: "Open logs folder", systemImageName: "folder") {
                     openLogsFolder()
-                }
-                actionRow(title: "Open widget snapshot", systemImageName: "rectangle.grid.1x2") {
-                    companionManager.publishWidgetSnapshot()
-                    NSWorkspace.shared.open(OpenClickyWidgetStateStore.snapshotURL)
                 }
             }
 

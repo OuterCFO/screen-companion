@@ -55,10 +55,6 @@ nonisolated enum AppBundleConfiguration {
     static let userAgentPlaintextProviderSyncEnabledDefaultsKey = "openClickyAgentPlaintextProviderSyncEnabled"
     static let userDesktopNotificationsEnabledDefaultsKey = "openClickyDesktopNotificationsEnabled"
     static let userAgentCompletionVoiceEnabledDefaultsKey = "openClickyAgentCompletionVoiceEnabled"
-    static let userWidgetsEnabledDefaultsKey = "openClickyWidgetsEnabled"
-    static let userWidgetsIncludeAgentTaskNamesDefaultsKey = "openClickyWidgetsIncludeAgentTaskNames"
-    static let userWidgetsIncludeMemorySnippetsDefaultsKey = "openClickyWidgetsIncludeMemorySnippets"
-    static let userWidgetsIncludeFocusedAppContextDefaultsKey = "openClickyWidgetsIncludeFocusedAppContext"
     static let userGlassOpacityDefaultsKey = "openClickyGlassOpacity"
     static let userGlassFrostingDefaultsKey = "openClickyGlassFrosting"
     static let userThemeDefaultsKey = "openClickyThemeAppearance"
@@ -67,15 +63,10 @@ nonisolated enum AppBundleConfiguration {
     /// When true (default), sample only while the primary mouse button is dragged during PTT hold.
     /// When false, any mouse movement while holding the key draws.
     static let userCircleWhileTalkingRequireClickDefaultsKey = "openClickyCircleWhileTalkingRequireClick"
-    static let appGroupIdentifier = "group.com.aminebenamar.openclicky"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
             userAgentCompletionVoiceEnabledDefaultsKey: true,
-            userWidgetsEnabledDefaultsKey: true,
-            userWidgetsIncludeAgentTaskNamesDefaultsKey: true,
-            userWidgetsIncludeMemorySnippetsDefaultsKey: true,
-            userWidgetsIncludeFocusedAppContextDefaultsKey: true,
             userCircleWhileTalkingEnabledDefaultsKey: true,
             userCircleWhileTalkingRequireClickDefaultsKey: true
         ])

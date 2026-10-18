@@ -912,15 +912,13 @@ final class CodexAgentSession: ObservableObject, Identifiable {
         - Current message log file: \(OpenClickyMessageLogStore.shared.currentLogFile.path)
         - Log review JSONL file: \(OpenClickyMessageLogStore.shared.reviewCommentsFile.path)
         - Log review comments file: \(OpenClickyMessageLogStore.shared.agentReviewCommentsFile.path)
-        - Widget snapshot file: \(OpenClickyWidgetStateStore.snapshotURL.path)
         - Before working, read the runtime map and persistent memory file if they exist.
         - Treat the OpenClicky persona already inlined in AGENTS.md as OpenClicky's operating identity. Do not open SOUL.md at task start unless the user explicitly asks to view or edit persona/storage files.
-        - If the user asks where OpenClicky stores logs, memory, skills, widgets, config, sessions, or review comments, answer from the runtime map and include exact paths.
-        - If the user asks to view or edit OpenClicky's logs, memory, learned skills, runtime map, widget state, or review comments, use the local filesystem paths above directly instead of claiming you cannot access them.
+        - If the user asks where OpenClicky stores logs, memory, skills, config, sessions, or review comments, answer from the runtime map and include exact paths.
+        - If the user asks to view or edit OpenClicky's logs, memory, learned skills, runtime map, or review comments, use the local filesystem paths above directly instead of claiming you cannot access them.
         - If the user asks to look at skills and optimize them, inspect bundled and learned skills, archive previous versions under \(homeManager.archivesDirectory.path), then update or create the improved skill files needed.
         - If the user asks to look at logs and learn from them, inspect message logs and review comments, extract actionable learnings, create or update memory and learned skills, and archive superseded artifacts under \(homeManager.archivesDirectory.path). Do not delete old versions.
         - If the user asks you to fix OpenClicky behavior, tune prompts, or review flagged logs, read the log review comments file and address those comments as concrete issues.
-        - If the user asks about widgets or desktop task/status display, read the widget snapshot file to understand the current widget state.
         - Do not say you cannot remember outside the current conversation. Use the persistent memory file.
         - Update persistent memory only for stable preferences, useful project facts, task outcomes, or workflow context that will clearly help future sessions.
         - Use or update learned skills only when the user asks to inspect, optimize, or learn from skills/logs, or when a repeated workflow would materially speed up future work. Create curated skills directly with specific names; do not create request-shaped `workflow_*` skills. Do not mention skill creation in progress or final answers unless the user asked about skills.
@@ -996,7 +994,7 @@ final class CodexAgentSession: ObservableObject, Identifiable {
 
         When working on the OpenClicky app repo, do not run terminal `xcodebuild`. Use Xcode for app builds and permission testing, and use `swiftc -parse <relevant Swift source files>` for lightweight Swift syntax checks.
 
-        OpenClicky's runtime map is at \(preparedLayout.runtimeMapFile.path). Read it when the user asks about logs, storage locations, memory, skills, widgets, settings, sessions, or where OpenClicky keeps anything. You may view or edit those local files when asked, subject to normal safety rules for destructive changes, credentials, and permissions.
+        OpenClicky's runtime map is at \(preparedLayout.runtimeMapFile.path). Read it when the user asks about logs, storage locations, memory, skills, settings, sessions, or where OpenClicky keeps anything. You may view or edit those local files when asked, subject to normal safety rules for destructive changes, credentials, and permissions.
 
         OpenClicky's persona is at \(preparedLayout.soulFile.path). Read it before task work. Treat it as the operating identity for voice-first behavior, autonomy, memory, archive-first changes, and plain-English progress.
 
@@ -1009,8 +1007,6 @@ final class CodexAgentSession: ObservableObject, Identifiable {
         Message logs are stored in \(OpenClickyMessageLogStore.shared.logDirectory.path). The current JSONL log is \(OpenClickyMessageLogStore.shared.currentLogFile.path). Log review comments are available at \(OpenClickyMessageLogStore.shared.agentReviewCommentsFile.path), with JSONL comments at \(OpenClickyMessageLogStore.shared.reviewCommentsFile.path). When the user asks you to fix issues discovered from logs, read those files and treat each comment as actionable review context.
 
         When the user asks you to optimize skills, audit learned skills, or learn from logs, treat that as an active task: inspect the relevant files, identify repeatable improvements, archive old versions first, then create or update memory entries and learned skill files that make future agents faster and better.
-
-        Widget state is available at \(OpenClickyWidgetStateStore.snapshotURL.path). When the user asks about widgets or desktop task/status display, read that snapshot before changing widget behavior.
 
         You are allowed to help with computer-use tasks. OpenClicky may be configured to use native CUA Swift or Background Computer Use for direct control before Agent Mode. When you operate the Mac from Agent Mode, prefer OpenClicky's available direct computer-use path and the `cuaDriver` MCP server when available; describe it as OpenClicky's computer-use path rather than assuming CUA is always selected. Do not choose or advertise Clawd or clawdcursor mouse/keyboard tools as the default for typing or focused-window control; use them only as an explicit fallback when OpenClicky's direct computer-use path is unavailable and say that it is a fallback. Simple focused-window typing is normally intercepted by OpenClicky before Agent Mode and handled through the selected direct computer-use backend.
 

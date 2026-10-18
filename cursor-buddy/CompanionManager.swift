@@ -598,7 +598,6 @@ final class CompanionManager: ObservableObject {
     let settingsWindowManager = OpenClickySettingsWindowManager()
     let logViewerWindowManager = OpenClickyLogViewerWindowManager()
     let markdownViewerWindowManager = OpenClickyMarkdownViewerWindowManager()
-    let widgetStateStore = OpenClickyWidgetStateStore()
     let codexHomeManager = CodexHomeManager()
     let nativeComputerUseController = OpenClickyNativeComputerUseController()
     let backgroundComputerUseController = OpenClickyBackgroundComputerUseController()
@@ -2065,20 +2064,15 @@ final class CompanionManager: ObservableObject {
             return
         }
 
-        handleWidgetDeepLink(url)
+        handleOpenClickyDeepLink(url)
     }
 
-    func publishWidgetSnapshot() {
+    /// Refreshes the menu bar task status after task or reply changes.
+    func scheduleStatusSync() {
         agentMenuBarStatusManager.scheduleSync(companionManager: self)
-        widgetStateStore.publishSnapshot(from: self)
     }
 
-    func scheduleWidgetSnapshotPublish() {
-        agentMenuBarStatusManager.scheduleSync(companionManager: self)
-        widgetStateStore.scheduleSnapshotPublish(from: self)
-    }
-
-    func handleWidgetDeepLink(_ url: URL) {
+    func handleOpenClickyDeepLink(_ url: URL) {
         guard url.scheme == "openclicky" else { return }
 
         switch url.host {
@@ -3612,7 +3606,7 @@ final class CompanionManager: ObservableObject {
                 }
                 self.updateAgentDockItem(for: sessionID, status: status)
                 self.refreshNotchAgentLiveActivity()
-                self.scheduleWidgetSnapshotPublish()
+                self.scheduleStatusSync()
                 self.scheduleRelaunchableAgentSessionsPersist()
                 self.updateAgentProgressNarration()
             }
@@ -3724,7 +3718,7 @@ final class CompanionManager: ObservableObject {
             session.resumeInterruptedTaskAfterRelaunch()
         }
         refreshNotchAgentLiveActivity()
-        scheduleWidgetSnapshotPublish()
+        scheduleStatusSync()
         scheduleRelaunchableAgentSessionsPersist()
     }
 
@@ -3733,7 +3727,7 @@ final class CompanionManager: ObservableObject {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty, agentDockItems[itemIndex].title != trimmedTitle else { return }
         agentDockItems[itemIndex].title = trimmedTitle
-        scheduleWidgetSnapshotPublish()
+        scheduleStatusSync()
     }
 
     private func scheduleAgentActivityRefresh(for sessionID: UUID) {
@@ -3750,7 +3744,7 @@ final class CompanionManager: ObservableObject {
                 guard let session = self.codexAgentSessions.first(where: { $0.id == sessionID }) else { return }
                 self.updateAgentDockItem(for: sessionID, status: session.status)
                 self.refreshNotchAgentLiveActivity()
-                self.scheduleWidgetSnapshotPublish()
+                self.scheduleStatusSync()
                 self.updateAgentProgressNarration()
             }
         }
@@ -3771,7 +3765,7 @@ final class CompanionManager: ObservableObject {
         observeCodexAgentSession(session)
         activeCodexAgentSessionID = session.id
         lastAgentContextSessionID = session.id
-        scheduleWidgetSnapshotPublish()
+        scheduleStatusSync()
         scheduleRelaunchableAgentSessionsPersist()
         return session
     }
@@ -3905,7 +3899,7 @@ final class CompanionManager: ObservableObject {
                 _ = createAndSelectNewCodexAgentSession()
             }
         }
-        scheduleWidgetSnapshotPublish()
+        scheduleStatusSync()
     }
 
     /// Restore a previously archived session.
@@ -3917,7 +3911,7 @@ final class CompanionManager: ObservableObject {
         ChatWorkspaceArchiveStore.save(archivedSessionIDs)
         ChatWorkspaceArchiveStore.removeSnapshot(for: sessionID)
         persistRelaunchableAgentSessions()
-        scheduleWidgetSnapshotPublish()
+        scheduleStatusSync()
     }
 
     /// Pop the currently active session into a floating mini-chat NSPanel scoped to that session.
@@ -3998,7 +3992,7 @@ final class CompanionManager: ObservableObject {
             ]
         )
         refreshNotchAgentLiveActivity()
-        scheduleWidgetSnapshotPublish()
+        scheduleStatusSync()
         persistRelaunchableAgentSessions()
     }
 
@@ -5068,7 +5062,7 @@ final class CompanionManager: ObservableObject {
                         self.recordRealtimeVoiceRouteFingerprint(Self.realtimeVoiceRouteFingerprint(userTranscript))
                         self.releaseRealtimeVoiceConversationMode(reason: "routed_by_app")
                         self.lastVoiceInteractionCompletedAt = Date()
-                        self.scheduleWidgetSnapshotPublish()
+                        self.scheduleStatusSync()
                         return
                     }
                     if !routedByApp {
@@ -5101,7 +5095,7 @@ final class CompanionManager: ObservableObject {
                         self.releaseRealtimeVoiceConversationMode(reason: "routed_by_app")
                     }
                     self.lastVoiceInteractionCompletedAt = Date()
-                    self.scheduleWidgetSnapshotPublish()
+                    self.scheduleStatusSync()
                     OpenClickyMessageLogStore.shared.append(
                         lane: "voice",
                         direction: "internal",
@@ -8592,7 +8586,7 @@ final class CompanionManager: ObservableObject {
         }
         showAgentDockWindowNearCurrentScreen()
         agentMenuBarStatusManager.scheduleSync(companionManager: self)
-        scheduleWidgetSnapshotPublish()
+        scheduleStatusSync()
     }
     private func ensureTutorDockItem() { saveCompactConversation(); refreshCompanionTaskIcons() }
     private var compactInputAgentSessionID: UUID?
@@ -10146,7 +10140,7 @@ final class CompanionManager: ObservableObject {
         if agentDockItems.isEmpty {
             agentDockWindowManager.hide()
         }
-        scheduleWidgetSnapshotPublish()
+        scheduleStatusSync()
     }
 
     private func startExplicitAgentTaskIfRequested(from transcript: String) -> Bool {
@@ -13767,7 +13761,7 @@ final class CompanionManager: ObservableObject {
                 agentDockItems.removeFirst(agentDockItems.count - 6)
             }
             refreshAgentDockFollowBehavior()
-            scheduleWidgetSnapshotPublish()
+            scheduleStatusSync()
             OpenClickyMessageLogStore.shared.append(
                 lane: "agent",
                 direction: "outgoing",
@@ -13955,7 +13949,7 @@ final class CompanionManager: ObservableObject {
             agentDockItems.removeFirst(agentDockItems.count - 6)
         }
         refreshAgentDockFollowBehavior()
-        scheduleWidgetSnapshotPublish()
+        scheduleStatusSync()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
             guard let self else { return }
@@ -13964,7 +13958,7 @@ final class CompanionManager: ObservableObject {
                 self.agentDockWindowManager.hide()
             }
             self.refreshAgentDockFollowBehavior()
-            self.scheduleWidgetSnapshotPublish()
+            self.scheduleStatusSync()
         }
     }
 
@@ -13986,7 +13980,7 @@ final class CompanionManager: ObservableObject {
             }
             self.pendingAgentDockItemRemovalTasks[sessionID] = nil
             self.refreshAgentDockFollowBehavior()
-            self.scheduleWidgetSnapshotPublish()
+            self.scheduleStatusSync()
         }
         pendingAgentDockItemRemovalTasks[sessionID] = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + effectiveDelay, execute: workItem)
@@ -14243,7 +14237,7 @@ final class CompanionManager: ObservableObject {
             )
             break
         }
-        scheduleWidgetSnapshotPublish()
+        scheduleStatusSync()
     }
 
     private static func agentDockActivityStatusLines(for session: CodexAgentSession?, fallback: String?) -> [String] {
@@ -14875,7 +14869,7 @@ final class CompanionManager: ObservableObject {
         if agentDockItems.isEmpty {
             agentDockWindowManager.hide()
         }
-        scheduleWidgetSnapshotPublish()
+        scheduleStatusSync()
     }
 
     func stopAgentDockItem(_ itemID: UUID) {
@@ -14888,7 +14882,7 @@ final class CompanionManager: ObservableObject {
             if agentDockItems.isEmpty {
                 agentDockWindowManager.hide()
             }
-            scheduleWidgetSnapshotPublish()
+            scheduleStatusSync()
         }
     }
 
@@ -15303,7 +15297,7 @@ final class CompanionManager: ObservableObject {
         }
 
         refreshAgentDockFollowBehavior()
-        scheduleWidgetSnapshotPublish()
+        scheduleStatusSync()
 
         if let screen {
             agentDockWindowManager.show(
@@ -16091,7 +16085,6 @@ final class CompanionManager: ObservableObject {
         - current message log: \(logs.currentLogFile.path)
         - log review comments: \(logs.agentReviewCommentsFile.path)
         - log review jsonl: \(logs.reviewCommentsFile.path)
-        - widget snapshot: \(OpenClickyWidgetStateStore.snapshotURL.path)
         """
     }
 

@@ -257,7 +257,7 @@ extension CompanionManager {
                         contextTitle: transcript
                     )
                     self.updateVoiceResponseCaption(spokenText)
-                    self.scheduleWidgetSnapshotPublish()
+                    self.scheduleStatusSync()
                     self.pendingAgentOfferInstruction = nil
                     self.pendingAgentOfferAt = nil
                     await completeRequest(extra: [
@@ -641,7 +641,7 @@ extension CompanionManager {
                     contextTitle: transcript
                 )
                 self.updateVoiceResponseCaption(spokenText)
-                self.scheduleWidgetSnapshotPublish()
+                self.scheduleStatusSync()
 
                 // If Haiku just offered to spin up an agent, remember
                 // the user's transcript as the candidate task so a

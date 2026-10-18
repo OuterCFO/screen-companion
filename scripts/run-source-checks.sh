@@ -10,7 +10,7 @@ if [[ "$(uname -s)" != Darwin ]]; then
   echo "macOS Swift checks require macOS; Python checks passed."
   exit 0
 fi
-for target in cursor-buddy OpenClickyWidgets cursor-buddyTests; do
+for target in cursor-buddy cursor-buddyTests; do
   find "$target" -name '*.swift' -print0 | xargs -0 xcrun swiftc -parse
 done
 scripts/run-provider-catalog-tests.sh

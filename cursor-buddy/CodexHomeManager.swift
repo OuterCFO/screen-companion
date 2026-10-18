@@ -618,11 +618,6 @@ final class CodexHomeManager {
         - Log review JSONL: \(logs.reviewCommentsFile.path)
         - Agent review comments: \(logs.agentReviewCommentsFile.path)
 
-        ## Widgets
-
-        - Widget snapshot: \(OpenClickyWidgetStateStore.snapshotURL.path)
-        - App group identifier: \(AppBundleConfiguration.appGroupIdentifier)
-
         ## Operating Rules
 
         - Read `memory.md` before work and update it with stable user preferences, project facts, task outcomes, and useful workflow context.

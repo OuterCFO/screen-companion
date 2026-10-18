@@ -135,7 +135,7 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDel
 
         menuBarPanelManager = MenuBarPanelManager(companionManager: companionManager)
         companionManager.start()
-        companionManager.scheduleWidgetSnapshotPublish()
+        companionManager.scheduleStatusSync()
         // This fork starts manually and does not use the upstream update feed.
     }
 
