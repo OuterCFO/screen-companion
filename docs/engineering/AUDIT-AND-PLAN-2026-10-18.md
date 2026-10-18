@@ -94,16 +94,21 @@ Checks per phase: source checks, the full-target typecheck, a native Xcode build
 2. Claude agents use the user's Claude Code settings, `auto` permission mode (`acceptEdits` in the browser sandbox), and resume their session on follow-ups.
 3. Done when: an agent task can be started on Claude Code or Codex from the same menu.
 
-### Phase 4: Slim down (implemented 18 October; awaiting native build and live test)
+### Phase 4: Slim down (done 18 October; live-tested)
 
 1. Remove the four unused areas listed under Decisions, separating the compact panel from the notch first.
 2. Done when: the app builds without them and the daily workflow is unchanged.
 
-### Phase 5: Split the central class
+### Phase 5: Split the central class (implemented 19 October; awaiting native build and live test)
 
 1. Move code out of `CompanionManager.swift` into focused coordinators: answer routing, tasks and sessions, computer use, agents, startup and permissions.
 2. Moves only, no behavior change, one coordinator per step with a typecheck after each.
 3. Done when: no file is over about 3,000 lines and the routing logic has unit tests.
+4. Result: `CompanionManager.swift` went from 14,219 to about 1,500 lines; behavior moved into 16 new extension files, the largest being `CompanionManager+ComputerUse.swift` at about 2,700 lines.
+   A line-by-line comparison against e7fc134 shows the same code apart from dropped `private` modifiers and one stale comment.
+   `VoiceRouter` and `SpokenText` moved to their own files, and `scripts/run-voice-routing-tests.sh` covers them with the compact-panel chords and write mode.
+5. Not done: the coordinators are still extensions of one class, not separate types with their own state.
+   The transcript parsers depend on the folder-shortcut memory in `CompanionManager+Onboarding.swift`, so turning them into a standalone type needs that dependency injected first.
 
 ### Phase 6: Open-source readiness
 

@@ -31,7 +31,9 @@ The product identity is OpenClicky:
 ## Key Files
 
 - `cursor-buddy/cursor_buddyApp.swift`: app entry point and delegate hookup.
-- `cursor-buddy/CompanionManager.swift`: central app state machine for input, screen capture, answers, overlay, settings, and Agent Mode.
+- `cursor-buddy/CompanionManager.swift`: central app state: stored properties, init, start and stop, permissions, and observation bindings.
+  Behavior lives in `CompanionManager+<Area>.swift` extensions: `VoiceInput` (shortcuts and transcript routing), `AIResponsePipeline` (answers), `CompactPanel` (tasks and Connect), `ComputerUse` and `ComputerUseParsing`, `AgentSessions`, `AgentTasks`, `AgentVoiceCommands`, `AgentRouteParsing`, `AgentSubmission`, `Conversation`, `Settings`, `ExternalControl`, `VisualGuidance`, `ResponseCaption`, `SystemPrompts`, `RequestTiming`, `WriteMode`, `PointTagParsing`, and `Onboarding`.
+- `cursor-buddy/VoiceRouter.swift` and `SpokenText.swift`: pure routing vocabulary and transcript normalization, tested by `scripts/run-voice-routing-tests.sh`.
 - `cursor-buddy/MenuBarPanelManager.swift`: menu-bar item and floating panel lifecycle.
 - `cursor-buddy/CompactInputWindowManager.swift` and `MenuBarPromptWindowManager.swift`: the compact panel (input, tasks, History, Connect).
 - `cursor-buddy/OverlayWindow.swift`: cursor overlay, agent dock icons, captions, and response cards.
