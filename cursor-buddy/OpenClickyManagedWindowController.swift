@@ -3,7 +3,7 @@
 //  cursor-buddy
 //
 //  Shared create/show/center/front boilerplate for OpenClicky's floating
-//  utility windows (log viewer, 3D viewer, and similar single-window
+//  utility windows (log viewer and similar single-window
 //  managers). Each manager still owns its own lifecycle and SwiftUI content;
 //  this controller only captures the repeated NSWindow plumbing.
 //

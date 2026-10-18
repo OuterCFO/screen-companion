@@ -99,7 +99,6 @@ enum OpenClickyPromptAutocomplete {
       OpenClickyPromptAutocompleteOption(id: "slash-ask", trigger: .slash, title: "/ask", subtitle: "Ask OpenClicky with current context", completion: "/ask", systemImage: "sparkles"),
       OpenClickyPromptAutocompleteOption(id: "slash-screen", trigger: .slash, title: "/screen", subtitle: "Use current screen context", completion: "/screen", systemImage: "rectangle.dashed"),
       OpenClickyPromptAutocompleteOption(id: "slash-search", trigger: .slash, title: "/search", subtitle: "Search the web through OpenClicky", completion: "/search", systemImage: "magnifyingglass"),
-      OpenClickyPromptAutocompleteOption(id: "slash-3d", trigger: .slash, title: "/3d", subtitle: "Generate a 3D object preview", completion: "/3d", systemImage: "cube.fill"),
       OpenClickyPromptAutocompleteOption(id: "slash-gmail", trigger: .slash, title: "/gmail", subtitle: "Use OpenClicky's gog Gmail workflow", completion: "/gmail", systemImage: "envelope.fill"),
       OpenClickyPromptAutocompleteOption(id: "slash-skill", trigger: .slash, title: "/skill", subtitle: "Ask OpenClicky to use or install a skill", completion: "/skill", systemImage: "wrench.and.screwdriver.fill")
     ]

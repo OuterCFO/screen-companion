@@ -160,8 +160,6 @@ final class ClaudeCodeCLIClient {
     You are OpenClicky's local Claude Code voice response session.
     Follow the current OpenClicky voice policy and context supplied with each user turn.
     Answer like a capable coworker over the user's shoulder: one or two natural spoken sentences by default, no bullets, markdown, headings, tables, or code blocks unless explicitly requested.
-
-    \(ThreeDGenerationDispatcher.systemPromptInstruction)
     """
 
     init?(model: String = OpenClickyModelCatalog.defaultAnthropicResponseModelID,

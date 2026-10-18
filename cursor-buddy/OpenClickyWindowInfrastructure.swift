@@ -4,7 +4,7 @@
 //
 //  Shared window-level constants and Liquid Glass backdrop plumbing used by
 //  OpenClicky's various floating window managers (notch capture, settings,
-//  log viewer, 3D viewer, mini chat, and the Agent Mode HUD).
+//  log viewer, mini chat, and the Agent Mode HUD).
 //
 
 import AppKit

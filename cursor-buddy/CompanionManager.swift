@@ -22,7 +22,6 @@ import OCUI
 @preconcurrency import OCBrowser
 import OCMarkdown
 import OCMemory
-import OC3DCore
 
 enum CompanionVoiceState: String {
     case idle
@@ -1154,25 +1153,6 @@ final class CompanionManager: ObservableObject {
         let trimmedUserTranscript = userTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAssistantResponse = assistantResponse.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedUserTranscript.isEmpty, !trimmedAssistantResponse.isEmpty else { return }
-
-        // 3D generation: scan both sides of the exchange for `/3d <prompt>` or
-        // `[OPENCLICKY_3D] prompt: "…"` markers. Matches dispatch a generation
-        // job (ThreeDGenerationService) and the floating viewer auto-opens.
-        let scanned = ThreeDGenerationDispatcher.scanAndDispatch(trimmedUserTranscript)
-            + ThreeDGenerationDispatcher.scanAndDispatch(trimmedAssistantResponse)
-        if !scanned.isEmpty {
-            OpenClickyMessageLogStore.shared.append(
-                lane: "voice",
-                direction: "internal",
-                event: "three_d.dispatcher.matched",
-                fields: [
-                    "reason": reason,
-                    "matchCount": scanned.count,
-                    "firstPrompt": scanned.first?.prompt ?? "",
-                    "firstStyle": scanned.first?.style.rawValue ?? ""
-                ]
-            )
-        }
 
         appendHomeChatEntry(role: .user, text: trimmedUserTranscript)
         appendHomeChatEntry(role: .assistant, text: trimmedAssistantResponse)

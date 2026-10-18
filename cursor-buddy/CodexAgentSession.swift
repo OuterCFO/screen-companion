@@ -1018,8 +1018,6 @@ final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceA
         You are allowed to perform web research when the user asks for current information, web search, browsing, or research. Use the available network, browser, or search capabilities in the runtime; cite the pages or URLs you relied on in your final response. Do not tell the user voice mode lacks live web access once a task is running in Agent Mode.
 
         If a task requires destructive filesystem, git, credentials, or system permission changes, explain the action before doing it.
-
-        \(ThreeDGenerationDispatcher.systemPromptInstruction)
         """
 
         let threadStart: [String: Any]
