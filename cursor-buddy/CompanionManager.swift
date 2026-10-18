@@ -3681,7 +3681,6 @@ final class CompanionManager: ObservableObject {
         }
     }
 
-    @discardableResult
 
     /// Fires from the processing watchdog when voiceState has been stuck
     /// at .processing for longer than processingWatchdogTimeout seconds.

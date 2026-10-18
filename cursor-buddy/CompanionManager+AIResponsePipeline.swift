@@ -168,7 +168,6 @@ extension CompanionManager {
                     userPromptForClaude = transcript
                 }
 
-                let hasVisualContext = !labeledImages.isEmpty
                 let visualAnalysisModelID = self.selectedModel
 
 
@@ -1122,7 +1121,7 @@ extension CompanionManager {
         guard !Self.isExpectedCancellation(error) else { return }
         let message = userFacingResponseFailureMessage(for: error)
         print("⚠️ Voice response failure (silent — no system-voice fallback): \(message)")
-        var fields: [String: Any] = [
+        let fields: [String: Any] = [
             "error": error.localizedDescription,
             "message": message
         ]
