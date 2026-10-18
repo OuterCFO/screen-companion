@@ -284,9 +284,6 @@ final class CompanionResponseOverlayManager {
         overlayPanel.setFrame(frame, display: true)
         contentView.frame = NSRect(origin: .zero, size: frame.size)
         repositionPanelNearCursor()
-        #if DEBUG
-        debugLogGeometry()
-        #endif
     }
 
 

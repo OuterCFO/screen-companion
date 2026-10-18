@@ -482,14 +482,7 @@ nonisolated final class OpenClickyMessageLogStore: @unchecked Sendable {
     }
 
     private static func isSensitiveKey(_ key: String) -> Bool {
-        let lowered = key.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current).lowercased()
-        return lowered.contains("api_key")
-            || lowered.contains("apikey")
-            || lowered.contains("authorization")
-            || lowered.contains("password")
-            || lowered.contains("secret")
-            || lowered.contains("token")
-            || lowered == "x-api-key"
+        LogRedactionPolicy.isSensitiveKey(key)
     }
 
     private static func isPrivateContentKey(_ key: String) -> Bool {

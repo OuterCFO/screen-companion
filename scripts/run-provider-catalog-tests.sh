@@ -64,6 +64,8 @@ expect(OpenClickyModelCatalog.voiceResponseModel(withID: "fable-5").id == "claud
 expect(OpenClickyModelCatalog.voiceResponseModel(withID: "sonnet-5").id == "claude-sonnet-5-5", "saved legacy sonnet-5 migrates")
 expect(OpenClickyModelCatalog.computerUseModel(withID: "opus-5").id == "claude-opus-5-5", "saved legacy opus-5 migrates")
 expect(OpenClickyModelCatalog.delegationModel(withID: nil).id == "claude-sonnet-5-5", "delegation default is a real ID")
+expect(OpenClickyModelCatalog.defaultAnthropicResponseModelID == "claude-sonnet-5-5", "Claude default is on every plan")
+expect(OpenClickyModelCatalog.voiceResponseModel(withID: "claude-fable-5-1").id == "claude-fable-5-1", "Fable stays selectable")
 
 // --- Catalog family mapping ---
 let apple = OpenClickyModelCatalog.voiceResponseModel(withID: OpenClickyModelCatalog.appleFoundationModelID)

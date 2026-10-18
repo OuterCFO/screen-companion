@@ -99,7 +99,8 @@ nonisolated enum OpenClickyModelCatalog {
     /// hears the user, routes direct computer-use locally, and delegates
     /// background work to the configured Codex model.
     static let defaultVoiceResponseModelID = defaultCodexActionsModelID
-    static let defaultAnthropicResponseModelID = "claude-fable-5-1"
+    /// Sonnet is on every Claude plan; Fable needs usage credits on some plans.
+    static let defaultAnthropicResponseModelID = "claude-sonnet-5-5"
     static let defaultCodexActionsModelID = "gpt-6-luna"
     /// On-device Apple Foundation Models (macOS 26+ / Apple Intelligence).
     static let appleFoundationModelID = "apple-foundation"
@@ -189,7 +190,9 @@ nonisolated enum OpenClickyModelCatalog {
         case "gpt-realtime-2", "gpt-realtime-2.0", "gpt-realtime-2-mini":
             return defaultSpeechModelID
         // Earlier builds saved short IDs that neither the Claude CLI nor the API resolves.
-        case "claude-haiku-4-5", "claude-haiku-4-6", "haiku-5", "fable", "fable-5", "claude-fable-5":
+        case "fable", "fable-5", "claude-fable-5":
+            return "claude-fable-5-1"
+        case "claude-haiku-4-5", "claude-haiku-4-6", "haiku-5":
             return defaultAnthropicResponseModelID
         case "claude-sonnet-4-6", "sonnet", "sonnet-5", "claude-sonnet-5":
             return "claude-sonnet-5-5"

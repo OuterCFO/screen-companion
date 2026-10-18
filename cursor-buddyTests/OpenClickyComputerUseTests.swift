@@ -201,7 +201,7 @@ struct OpenClickyComputerUseTests {
         #expect(apple.provider.voiceBackendFamily == .apple)
         #expect(apple.maxOutputTokens >= 64_000)
         #expect(OpenClickyVoiceBackendFamily.apple.defaultModelID == OpenClickyModelCatalog.appleFoundationModelID)
-        #expect(OpenClickyVoiceBackendFamily.claude.defaultModelID == "claude-fable-5-1")
+        #expect(OpenClickyVoiceBackendFamily.claude.defaultModelID == "claude-sonnet-5-5")
         #expect(OpenClickyVoiceBackendFamily.codex.defaultModelID == OpenClickyModelCatalog.defaultCodexActionsModelID)
         #expect(OpenClickyVoiceBackendFamily.allCases.count == 3)
 

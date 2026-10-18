@@ -131,11 +131,15 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDel
                 app.terminate()
             }
             if !duplicateApps.isEmpty {
-                // Give the system a brief moment to release TCP sockets and file handles
-                Thread.sleep(forTimeInterval: 0.3)
+                // Give the old instance a moment to release its ports and files without blocking the main thread.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.finishLaunching() }
+                return
             }
         }
+        finishLaunching()
+    }
 
+    private func finishLaunching() {
         UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 0])
         AppBundleConfiguration.registerDefaults()
 

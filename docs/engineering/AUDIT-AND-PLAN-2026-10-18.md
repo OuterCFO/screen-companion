@@ -80,7 +80,7 @@ Checks per phase: source checks, the full-target typecheck, a native Xcode build
 5. Add a generic command-line provider so any CLI that reads a prompt and prints an answer can be added by configuration.
 6. Done when: adding a provider touches one new file and one registry line, and all existing providers pass the same contract tests.
 
-### Phase 2: Smooth daily flow
+### Phase 2: Smooth daily flow (implemented 18 October; awaiting native build and live test)
 
 1. Stop the failing realtime speech work when playback is muted or no key exists.
 2. Log panel geometry once per answer, and fix the redaction of latency fields.

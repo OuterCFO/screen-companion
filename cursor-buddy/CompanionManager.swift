@@ -9743,7 +9743,7 @@ final class CompanionManager: ObservableObject {
             }
 
             do {
-                let streamingTTSSession = self.voiceTTSClient.beginStreamingResponse {
+                let streamingTTSSession: StreamingTTSSession? = !AppBundleConfiguration.isVoicePlaybackEnabled ? nil : self.voiceTTSClient.beginStreamingResponse {
                     guard !didMarkAudioStarted else { return }
                     didMarkAudioStarted = true
                     self.voiceState = .responding
@@ -9762,7 +9762,7 @@ final class CompanionManager: ObservableObject {
                 }
 
                 if let chosenFiller = fire.chosenFiller {
-                    streamingTTSSession.enqueuePrebakedSamples(chosenFiller.samples)
+                    streamingTTSSession?.enqueuePrebakedSamples(chosenFiller.samples)
                 }
 
                 // Push whatever tokens have already accumulated. The
@@ -9777,7 +9777,7 @@ final class CompanionManager: ObservableObject {
                           safeSpoken.count > emittedSpokenSoFar.count else { return }
                     let delta = String(safeSpoken.dropFirst(emittedSpokenSoFar.count))
                     emittedSpokenSoFar = safeSpoken
-                    streamingTTSSession.appendText(delta)
+                    streamingTTSSession?.appendText(delta)
                 }
 
                 // Drain the buffered continuation already collected
@@ -9794,13 +9794,13 @@ final class CompanionManager: ObservableObject {
                 do {
                     continuationText = try await fire.task.value
                 } catch is CancellationError {
-                    streamingTTSSession.cancel()
+                    streamingTTSSession?.cancel()
                     await completeRequest(status: "cancelled", extra: ["cancelledAt": "speculative_task"])
                     return
                 } catch {
                     print("⚠️ Speculative commit failed: \(error)")
-                    streamingTTSSession.cancel()
-                    speakResponseFailureFallback(error)
+                    streamingTTSSession?.cancel()
+                    speakResponseFailureFallback(error, showsInBubble: true)
                     await completeRequest(status: "failed", extra: ["error": error.localizedDescription])
                     return
                 }
@@ -9843,7 +9843,7 @@ final class CompanionManager: ObservableObject {
 
                 if !spokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     do {
-                        try await streamingTTSSession.finish()
+                        try await streamingTTSSession?.finish()
                     } catch {
                         guard !Self.isExpectedCancellation(error) else {
                             await completeRequest(status: "cancelled", extra: ["cancelledAt": "tts"])
@@ -9853,7 +9853,7 @@ final class CompanionManager: ObservableObject {
                         speakResponseFailureFallback(error)
                     }
                 } else {
-                    streamingTTSSession.cancel()
+                    streamingTTSSession?.cancel()
                 }
 
                 await completeRequest(extra: ["speculativeCommit": true])

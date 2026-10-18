@@ -302,6 +302,9 @@ nonisolated enum AppBundleConfiguration {
         userDefaultsValue(forKey: userTTSProviderDefaultsKey) ?? "openai_realtime"
     }
 
+    /// Spoken replies are off at volume 0 (the default); no speech work runs then.
+    static var isVoicePlaybackEnabled: Bool { voicePlaybackVolume() > 0 }
+
     static func voicePlaybackVolume() -> Double {
         let defaults = UserDefaults.standard
         guard defaults.object(forKey: openClickyVoicePlaybackVolumeDefaultsKey) != nil else {

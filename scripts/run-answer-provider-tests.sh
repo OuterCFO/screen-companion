@@ -125,6 +125,28 @@ struct Failure: Error {}
         try await Task.sleep(for: .milliseconds(200)); task.cancel()
         do { _ = try await task.value; preconditionFailure("expected cancellation") } catch is CancellationError {}
         print("PASS: command-line runs stream output, report failures, time out, and cancel")
+
+        // Log redaction hides credentials but keeps measurements readable
+        for secret in ["refreshToken", "access_token", "Authorization", "x-api-key", "openAIAPIKey", "ANTHROPIC_API_KEY",
+                       "clientSecret", "password", "GOG_KEYRING_PASSWORD", "awsSecretKey", "sessionCookie"] {
+            precondition(LogRedactionPolicy.isSensitiveKey(secret), secret)
+        }
+        for visible in ["maxOutputTokens", "firstTokenLatencyMs", "apiKeyFallback", "tokenCount", "model", "durationMs"] {
+            precondition(!LogRedactionPolicy.isSensitiveKey(visible), visible)
+        }
+        print("PASS: log redaction keys")
+
+        // Provider failures become one actionable sentence
+        func message(_ text: String) -> String? { ProviderErrorMessage.userFacing(text, modelLabel: "Fable 5.1") }
+        precondition(message("Claude Code: Not logged in · Please run /login")?.contains("/login") == true)
+        precondition(message("Claude Code: You're out of usage credits. Switch to another model, or manage usage credits at https://claude.ai/settings/usage to continue.")
+                     == "Fable 5.1 isn't available on your Claude plan right now. Choose another model, such as Sonnet 5.5.")
+        precondition(message("You’ve hit your usage limit. Upgrade to Pro")?.contains("usage limit") == true)
+        precondition(message("OpenClicky could not find its bundled Codex executable.")?.hasPrefix("Codex isn't running") == true)
+        precondition(message("Claude Code did not finish within 120 seconds.")?.contains("took too long") == true)
+        precondition(message("No provider is set up for Apple. Sign in to its app or CLI, or add an API key in Settings.")?.hasPrefix("No provider") == true)
+        precondition(message("The network connection was lost.") == nil)
+        print("PASS: actionable provider error messages")
         exit(0)
     }
 }
@@ -136,5 +158,7 @@ xcrun swiftc -parse-as-library -default-isolation MainActor -target "$(uname -m)
   "$ROOT/cursor-buddy/OpenClickyModelCatalog.swift" \
   "$ROOT/cursor-buddy/CommandLineProviderConfig.swift" \
   "$ROOT/cursor-buddy/CommandLineProvider.swift" \
-  "$ROOT/cursor-buddy/ClaudeCodeCLIProtocol.swift"
+  "$ROOT/cursor-buddy/ClaudeCodeCLIProtocol.swift" \
+  "$ROOT/cursor-buddy/LogRedactionPolicy.swift" \
+  "$ROOT/cursor-buddy/ProviderErrorMessage.swift"
 "$OUT/answer_provider_tests"

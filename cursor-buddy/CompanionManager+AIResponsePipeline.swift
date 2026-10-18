@@ -285,7 +285,8 @@ extension CompanionManager {
                     modelProvider: OpenClickyModelCatalog.voiceResponseModel(withID: visualAnalysisModelID).provider,
                     ttsProvider: self.selectedTTSProvider
                 )
-                let chosenFiller = shouldUseFiller
+                let speaksReply = AppBundleConfiguration.isVoicePlaybackEnabled
+                let chosenFiller = shouldUseFiller && speaksReply
                     ? FillerPhraseLibrary.shared.contextualFiller(
                         for: transcript,
                         screenContextNeeded: hasVisualContext
@@ -321,7 +322,8 @@ extension CompanionManager {
                 // parallel and plays them in order. First audio reaches
                 // the speaker as soon as the FIRST sentence completes,
                 // not after the whole response.
-                let streamingTTSSession = self.voiceTTSClient.beginStreamingResponse {
+                // Muted replies skip speech entirely, so no audio engine or provider request starts.
+                let streamingTTSSession: StreamingTTSSession? = !speaksReply ? nil : self.voiceTTSClient.beginStreamingResponse {
                     guard !didMarkAudioStarted else { return }
                     didMarkAudioStarted = true
                     self.voiceState = .responding
@@ -351,7 +353,7 @@ extension CompanionManager {
                 // exact text of this filler so Haiku's reply continues
                 // from it instead of restarting.
                 if let chosenFiller {
-                    streamingTTSSession.enqueuePrebakedSamples(chosenFiller.samples)
+                    streamingTTSSession?.enqueuePrebakedSamples(chosenFiller.samples)
                 }
 
                 // Track the cumulative spoken text we've already pushed
@@ -448,7 +450,7 @@ extension CompanionManager {
                         }
                         let delta = String(safeSpoken.dropFirst(emittedSpokenSoFar.count))
                         emittedSpokenSoFar = safeSpoken
-                        streamingTTSSession.appendText(delta)
+                        streamingTTSSession?.appendText(delta)
                     }
                 )
                 // Reassemble the full utterance: filler text (already
@@ -497,7 +499,7 @@ extension CompanionManager {
                     transcript: transcript,
                     source: "voice_response"
                 ) {
-                    streamingTTSSession.cancel()
+                    streamingTTSSession?.cancel()
                     await completeRequest(
                         status: "cancelled",
                         extra: [
@@ -689,11 +691,11 @@ extension CompanionManager {
                        continuationSpoken.count > emittedSpokenSoFar.count {
                         let tailDelta = String(continuationSpoken.dropFirst(emittedSpokenSoFar.count))
                         emittedSpokenSoFar = continuationSpoken
-                        streamingTTSSession.appendText(tailDelta)
+                        streamingTTSSession?.appendText(tailDelta)
                     }
 
                     do {
-                        try await streamingTTSSession.finish()
+                        try await streamingTTSSession?.finish()
                         guard !Task.isCancelled else {
                             await completeRequest(
                                 status: "cancelled",
@@ -757,7 +759,7 @@ extension CompanionManager {
                 } else {
                     // No spoken text — discard the streaming session so
                     // its engine tears down cleanly.
-                    streamingTTSSession.cancel()
+                    streamingTTSSession?.cancel()
                 }
                 var completionFields = self.voiceResponseExecutionFields(
                     effectiveModelID: visualAnalysisModelID == self.selectedModel ? nil : visualAnalysisModelID
@@ -771,7 +773,8 @@ extension CompanionManager {
                 )
                 completionFields["audioPlaybackState"] = audioPlaybackState
                 if audioPlaybackState == "never_started" {
-                    OpenClickyMessageLogStore.shared.append(
+                    // Muted replies never start audio by design; only report real playback failures.
+                    if speaksReply { OpenClickyMessageLogStore.shared.append(
                         lane: "voice",
                         direction: "internal",
                         event: "voice.response.audio_never_started",
@@ -781,7 +784,7 @@ extension CompanionManager {
                             "controller": self.activeTTSControllerName,
                             "requestID": timing?.requestID ?? "none"
                         ]
-                    )
+                    ) }
                     self.latestVoiceResponseCard = ClickyResponseCard(
                         source: .voice,
                         rawText: spokenText,
@@ -808,7 +811,7 @@ extension CompanionManager {
                         "error": error.localizedDescription
                     ]
                 )
-                speakResponseFailureFallback(error)
+                speakResponseFailureFallback(error, showsInBubble: true)
                 await completeRequest(
                     status: "failed",
                     extra: [
@@ -1657,7 +1660,7 @@ extension CompanionManager {
     /// the macOS system TTS — that introduces a second voice that the
     /// user doesn't recognize. Errors surface through logs and the
     /// response card; the agent simply doesn't speak this turn.
-    func speakResponseFailureFallback(_ error: Error) {
+    func speakResponseFailureFallback(_ error: Error, showsInBubble: Bool = false) {
         guard !Self.isExpectedCancellation(error) else { return }
         let message = userFacingResponseFailureMessage(for: error)
         print("⚠️ Voice response failure (silent — no system-voice fallback): \(message)")
@@ -1677,6 +1680,8 @@ extension CompanionManager {
             rawText: message,
             contextTitle: lastTranscript ?? ""
         )
+        // Show answer failures in the pointer bubble; speech failures keep the answer that is already there.
+        if showsInBubble { updateVoiceResponseCaption("<cursor_reply>" + message + "</cursor_reply>", force: true, updatesDock: false) }
     }
 
     static func isExpectedCancellation(_ error: Error) -> Bool {
@@ -1699,6 +1704,10 @@ extension CompanionManager {
 
     private func userFacingResponseFailureMessage(for error: Error) -> String {
         let nsError = error as NSError
+        let modelLabel = OpenClickyModelCatalog.voiceResponseModel(withID: selectedModel).label
+        if let message = ProviderErrorMessage.userFacing(error.localizedDescription, modelLabel: modelLabel) {
+            return message
+        }
 
         switch nsError.domain {
         case "ClaudeAPI":
