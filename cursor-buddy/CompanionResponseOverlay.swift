@@ -85,7 +85,8 @@ final class CompanionResponseOverlayManager {
         startCursorTracking()
         isVisible = true
         #if DEBUG
-        debugAnchorSamplesRemaining = 12
+        // A few placement samples per reply; resetting on every chunk logged dozens per answer.
+        debugAnchorSamplesRemaining = 3
         #endif
         overlayPanel?.alphaValue = overlayViewModel.companion?.cursorOverlayState.aiPointerScreenLocation == nil ? 0 : 1
         repositionPanelNearCursor()
@@ -95,9 +96,6 @@ final class CompanionResponseOverlayManager {
     func updateStreamingText(_ accumulatedText: String) {
         guard visibilityPolicy.canPresent else { return }
         overlayViewModel.streamingResponseText = accumulatedText
-        #if DEBUG
-        debugAnchorSamplesRemaining = 12
-        #endif
         resizePanelToFitContent()
         // Published SwiftUI text may lay out on the next main-loop pass.
         DispatchQueue.main.async { [weak self] in
