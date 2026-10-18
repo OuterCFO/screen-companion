@@ -8931,7 +8931,7 @@ final class CompanionManager: ObservableObject {
 
         // The compact panel skips the broad router but still honors an explicit request for an agent.
         if !allowsAgentRouting, let instruction = ScreenTutorRoutingPolicy.explicitAgentInstruction(trimmedText) {
-            startVoiceAgentTaskPlan(instruction: instruction, voiceContextUserTranscript: trimmedText)
+            startVoiceAgentTaskPlan(instruction: instruction, speakAcknowledgement: false, voiceContextUserTranscript: trimmedText)
             beginCursorReplyPresentation()
             updateVoiceResponseCaption("<cursor_reply>Started a background task. Its result will appear here when it finishes.</cursor_reply>",
                                        force: true, updatesDock: false)
@@ -13890,6 +13890,11 @@ final class CompanionManager: ObservableObject {
             )
 
             guard speakAcknowledgement else { return }
+            guard AppBundleConfiguration.isVoicePlaybackEnabled else {
+                beginCursorReplyPresentation()
+                updateVoiceResponseCaption("<cursor_reply>" + acknowledgement + "</cursor_reply>", force: true, updatesDock: false)
+                return
+            }
 
             // Give the dock item a short settle window before speaking.
             // The cursor remains in place while the separate agent
@@ -15912,6 +15917,20 @@ final class CompanionManager: ObservableObject {
         executionStartedAt: Date? = nil,
         extra: [String: Any] = [:]
     ) {
+        // Muted replies (the default) are shown instead of spoken. Attempting speech here failed and its
+        // error path cleared the bubble, hiding agent results moments after they appeared.
+        guard AppBundleConfiguration.isVoicePlaybackEnabled else {
+            if interruptExisting { interruptCurrentVoiceResponse() }
+            beginCursorReplyPresentation()
+            updateVoiceResponseCaption("<cursor_reply>" + text + "</cursor_reply>", force: true, updatesDock: false)
+            if let route {
+                var fields = extra
+                fields["spokenTextLength"] = text.count
+                fields["audioPlaybackState"] = "muted"
+                markRequestCompleted(route: route, executionStartedAt: executionStartedAt, timing: timing, extra: fields)
+            }
+            return
+        }
         if interruptExisting {
             interruptCurrentVoiceResponse()
         }

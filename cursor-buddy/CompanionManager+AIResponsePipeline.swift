@@ -918,7 +918,8 @@ extension CompanionManager {
                 reason: "tutor_observation"
             )
 
-            if !spokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if AppBundleConfiguration.isVoicePlaybackEnabled,
+               !spokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 try await voiceTTSClient.speakText(spokenText) {
                     self.voiceState = .responding
                 }
