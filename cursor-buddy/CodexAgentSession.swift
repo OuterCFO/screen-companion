@@ -1,7 +1,6 @@
 import AppKit
 import Combine
 import Foundation
-import OCBrowser
 import OCCore
 #if canImport(FoundationModels)
 import FoundationModels
@@ -230,7 +229,7 @@ enum CodexAgentProgressStage: Equatable {
 }
 
 @MainActor
-final class CodexAgentSession: ObservableObject, Identifiable, BrowserWorkspaceAgentSessionProtocol {
+final class CodexAgentSession: ObservableObject, Identifiable {
     let id: UUID
     let createdAt: Date
     let accentTheme: OCCore.ClickyAccentTheme

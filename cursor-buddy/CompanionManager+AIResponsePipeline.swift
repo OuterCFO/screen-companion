@@ -15,7 +15,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 import OCCore
 import OCUI
-@preconcurrency import OCBrowser
 import OCMarkdown
 import OCMemory
 

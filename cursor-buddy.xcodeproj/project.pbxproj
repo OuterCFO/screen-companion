@@ -11,7 +11,6 @@
 		0C2F2A9E0130F946F18D4E73 /* OCAutomation in Frameworks */ = {isa = PBXBuildFile; productRef = 0C2AFE5F8114A34812946E6A /* OCAutomation */; };
 		24026C87304789D000DF2722 /* OCAudioCore in Frameworks */ = {isa = PBXBuildFile; productRef = 24026C86304789D000DF2722 /* OCAudioCore */; };
 		24026C89304789F100DF2722 /* OCComputerUseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 24026C88304789F100DF2722 /* OCComputerUseCore */; };
-		24D85D612FBEE5D8004FEDAD /* OCBrowser in Frameworks */ = {isa = PBXBuildFile; productRef = 24D85D602FBEE5D8004FEDAD /* OCBrowser */; };
 		24D85D632FBEE5D8004FEDAD /* OCCore in Frameworks */ = {isa = PBXBuildFile; productRef = 24D85D622FBEE5D8004FEDAD /* OCCore */; };
 		24D85D652FBEE5D8004FEDAD /* OCMarkdown in Frameworks */ = {isa = PBXBuildFile; productRef = 24D85D642FBEE5D8004FEDAD /* OCMarkdown */; };
 		24D85D672FBEE5D8004FEDAD /* OCMemory in Frameworks */ = {isa = PBXBuildFile; productRef = 24D85D662FBEE5D8004FEDAD /* OCMemory */; };
@@ -67,7 +66,6 @@
 /* Begin PBXFileReference section */
 		0C00E5337FDB5D4202A87769 /* OCFoundation */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = OCFoundation; sourceTree = "<group>"; };
 		0C14D1A08DC8E942718EB3A8 /* OCAutomation */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = OCAutomation; sourceTree = "<group>"; };
-		24D85D592FBEE591004FEDAD /* OCBrowser */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = OCBrowser; sourceTree = "<group>"; };
 		24D85D5A2FBEE591004FEDAD /* OCCore */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = OCCore; sourceTree = "<group>"; };
 		24D85D5B2FBEE591004FEDAD /* OCMarkdown */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = OCMarkdown; sourceTree = "<group>"; };
 		24D85D5C2FBEE591004FEDAD /* OCMemory */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = OCMemory; sourceTree = "<group>"; };
@@ -130,7 +128,6 @@
 				24D85D692FBEE5D8004FEDAD /* OCUI in Frameworks */,
 				24026C89304789F100DF2722 /* OCComputerUseCore in Frameworks */,
 				24026C87304789D000DF2722 /* OCAudioCore in Frameworks */,
-				24D85D612FBEE5D8004FEDAD /* OCBrowser in Frameworks */,
 				0C2F2A9E0130F946F18D4E73 /* OCAutomation in Frameworks */,
 				0C1316D624299542AA88F53B /* OCFoundation in Frameworks */,
 			);
@@ -163,7 +160,6 @@
 		24D85D5E2FBEE591004FEDAD /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				24D85D592FBEE591004FEDAD /* OCBrowser */,
 				24D85D5A2FBEE591004FEDAD /* OCCore */,
 				24D85D5B2FBEE591004FEDAD /* OCMarkdown */,
 				24D85D5C2FBEE591004FEDAD /* OCMemory */,
@@ -252,7 +248,6 @@
 				AA00BB022F6500020039DA55 /* Sparkle */,
 				AA00BB042F6500040039DA55 /* GLTFSceneKit */,
 				AA00BB062F6500060039DA55 /* FluidAudio */,
-				24D85D602FBEE5D8004FEDAD /* OCBrowser */,
 				24D85D622FBEE5D8004FEDAD /* OCCore */,
 				24D85D642FBEE5D8004FEDAD /* OCMarkdown */,
 				24D85D662FBEE5D8004FEDAD /* OCMemory */,
@@ -369,7 +364,6 @@
 			mainGroup = 28F22CB62F56440300A0FC59;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				0C89D43588327048D7B81751 /* XCLocalSwiftPackageReference "Packages/OCBrowser" */,
 				0C82117744574745D88F0641 /* XCLocalSwiftPackageReference "Packages/OCCore" */,
 				0C9D1BE457D49347C7B7B602 /* XCLocalSwiftPackageReference "Packages/OCMarkdown" */,
 				0C9D7CFEFF20BB4E4FA18E95 /* XCLocalSwiftPackageReference "Packages/OCMemory" */,
@@ -948,10 +942,6 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/OCUI;
 		};
-		0C89D43588327048D7B81751 /* XCLocalSwiftPackageReference "Packages/OCBrowser" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/OCBrowser;
-		};
 		0C9D1BE457D49347C7B7B602 /* XCLocalSwiftPackageReference "Packages/OCMarkdown" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/OCMarkdown;
@@ -1033,11 +1023,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 24026C853047898400DF2722 /* XCLocalSwiftPackageReference "Packages/OCComputerUseCore" */;
 			productName = OCComputerUseCore;
-		};
-		24D85D602FBEE5D8004FEDAD /* OCBrowser */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 0C89D43588327048D7B81751 /* XCLocalSwiftPackageReference "Packages/OCBrowser" */;
-			productName = OCBrowser;
 		};
 		24D85D622FBEE5D8004FEDAD /* OCCore */ = {
 			isa = XCSwiftPackageProductDependency;

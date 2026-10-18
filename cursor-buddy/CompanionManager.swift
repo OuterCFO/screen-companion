@@ -19,7 +19,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 import OCCore
 import OCUI
-@preconcurrency import OCBrowser
 import OCMarkdown
 import OCMemory
 
@@ -15080,7 +15079,7 @@ final class CompanionManager: ObservableObject {
     }
 
     @discardableResult
-    func submitNewAgentTaskFromUI(_ prompt: String, source: String = "agent_new_task_prompt") -> BrowserWorkspaceAgentSessionProtocol? {
+    func submitNewAgentTaskFromUI(_ prompt: String, source: String = "agent_new_task_prompt") -> CodexAgentSession? {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPrompt.isEmpty else { return nil }
         var taskPrompt = trimmedPrompt
@@ -15134,8 +15133,7 @@ final class CompanionManager: ObservableObject {
         let session = createAndLaunchCodexAgentSession(
             title: Self.shortAgentInstructionSummary(launchPrompt),
             prompt: launchPrompt,
-            includeScreenContext: Self.shouldAttachScreenContext(to: launchPrompt),
-            restrictedExecutionPolicy: source == "browser_workspace_untrusted_context"
+            includeScreenContext: Self.shouldAttachScreenContext(to: launchPrompt)
         )
         agentRequestTimingsBySessionID[session.id] = timing
         agentExecutionStartDatesBySessionID[session.id] = executionStartedAt

@@ -12,7 +12,6 @@ import Carbon
 import ServiceManagement
 import SwiftUI
 import Sparkle
-import OCBrowser
 
 @main
 struct cursor_buddyApp: App {
@@ -60,12 +59,6 @@ struct cursor_buddyApp: App {
                 }
                 .keyboardShortcut("n", modifiers: [.command, .option])
 
-                Divider()
-
-                Button("Browser Workspace…") {
-                    appDelegate.showBrowserWorkspaceFromApplicationMenu()
-                }
-                .keyboardShortcut("b", modifiers: [.command, .option])
 
                 Divider()
 
@@ -175,10 +168,6 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDel
 
     func showSettingsWindowFromApplicationMenu() {
         companionManager.showSettingsWindow()
-    }
-
-    func showBrowserWorkspaceFromApplicationMenu() {
-        OpenClickyBrowserWorkspaceWindowManager.shared.show(delegate: companionManager)
     }
 
     func showMemoryWindowFromApplicationMenu() {

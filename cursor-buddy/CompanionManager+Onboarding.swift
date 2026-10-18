@@ -14,7 +14,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 import OCCore
 import OCUI
-@preconcurrency import OCBrowser
 import OCMarkdown
 import OCMemory
 
@@ -876,75 +875,3 @@ final class OpenClickyDirectActionMemoryStore: @unchecked Sendable {
     }
 }
 
-extension CompanionManager: BrowserWorkspaceAgentDelegate {
-    public func hasLinkedAgentSession(id: UUID) -> Bool {
-        return codexAgentSessions.contains(where: { $0.id == id })
-    }
-
-    public func submitAgentPromptFromUI(_ prompt: String, source: String) {
-        if source == "browser_workspace_untrusted_context",
-           !codexAgentSession.usesRestrictedExecutionPolicy {
-            codexAgentSession.stop(reason: "browser_execution_policy_upgrade")
-            codexAgentSession.configureRestrictedExecutionPolicy()
-        }
-        submitAgentPromptFromUI(prompt)
-    }
-
-    /// True when OpenClicky has a local provider that can participate in the
-    /// Browser Workspace CUA loop. Codex voice is deliberately excluded here:
-    /// it has host-side search/tool affordances, not this WKWebView tool loop,
-    /// so treating it as a browser driver makes it answer from web search
-    /// while ignoring the active built-in browser tab.
-    public func hasAgentSDK() -> Bool {
-        return claudeCodeCLI != nil
-    }
-
-    /// Provider-aware dispatch used by the Browser Workspace CUA fallback
-    /// when no Anthropic API key is configured. This path must stay on Claude
-    /// Code because the Browser Workspace runner expects a text-only
-    /// browser-tool protocol; Codex voice is not a safe substitute for that.
-    public func analyzeImageWithAgentSDK(
-        images: [(data: Data, label: String)],
-        systemPrompt: String,
-        conversationHistory: [(userPlaceholder: String, assistantResponse: String)],
-        userPrompt: String,
-        onTextChunk: @MainActor @Sendable @escaping (String) -> Void
-    ) async throws -> String {
-        let modelOption = OpenClickyModelCatalog.computerUseModel(withID: selectedComputerUseModel)
-
-        guard let sdk = claudeCodeCLI else {
-            throw NSError(
-                domain: "CompanionManager",
-                code: -404,
-                userInfo: [NSLocalizedDescriptionKey: "No Browser Workspace CUA provider is available. Add an Anthropic API key or sign in to Claude Code."]
-            )
-        }
-
-        sdk.model = modelOption.provider == .anthropic ? modelOption.id : OpenClickyModelCatalog.defaultDelegationModelID
-        let (text, _) = try await sdk.analyzeImageStreaming(
-            images: images,
-            systemPrompt: systemPrompt,
-            conversationHistory: conversationHistory,
-            userPrompt: userPrompt,
-            onTextChunk: onTextChunk
-        )
-        return text
-    }
-
-    public func getAnthropicAPIKey() -> String {
-        return AppBundleConfiguration.anthropicAPIKey() ?? ""
-    }
-
-    public func getAnthropicBaseURL() -> String {
-        return AppBundleConfiguration.anthropicBaseURL()
-    }
-
-    public func getSelectedComputerUseModelID() -> String {
-        return selectedComputerUseModel
-    }
-
-    public func selectedComputerUseModelUsesAnthropic() -> Bool {
-        return OpenClickyModelCatalog.computerUseModel(withID: selectedComputerUseModel).provider == .anthropic
-    }
-
-}
