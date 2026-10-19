@@ -19,6 +19,10 @@ The app is configured for OTA-style updates:
 
 The checked-in `appcast.xml` is intentionally an empty OpenClicky feed until the first signed release artifact exists.
 
+`SUPublicEDKey` is still the original project's key, and this project does not hold its private key.
+Before this project's first release, generate a new key pair with Sparkle's `generate_keys`, replace `SUPublicEDKey`, and sign the appcast with the new private key.
+The feed now points at this repository, so builds never receive the original project's updates.
+
 Before the first real OpenClicky release, confirm that the Sparkle private key for account `openclicky` is present in your Keychain and matches `SUPublicEDKey`. Keep the private key outside the repository. Existing installed builds can only move to a new Sparkle key if they first receive a bridge update signed by the old key.
 
 ## Release Flow

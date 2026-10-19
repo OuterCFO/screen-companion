@@ -4,7 +4,7 @@
 Ask about what you are working on, get an answer beside an AI pointer, and keep using your app.
 Use it for navigation, troubleshooting, learning software, understanding unfamiliar interfaces, and ongoing computer work.
 
-This standalone project builds on [Jason Kneen's MIT-licensed OpenClicky](https://github.com/jasonkneen/openclicky) and adds a compact, no-notch workflow with OpenSuperWhisper local dictation and ChatGPT-backed Codex sessions.
+This standalone, model-agnostic project builds on [Jason Kneen's MIT-licensed OpenClicky](https://github.com/jasonkneen/openclicky) and adds a compact, no-notch workflow with OpenSuperWhisper local dictation, Claude Code, and Codex.
 It is independent of the commercial Clicky product and of OpenAI.
 
 ## What this project adds
@@ -28,9 +28,9 @@ It is independent of the commercial Clicky product and of OpenAI.
 - Answers appear in the pointer bubble rather than being spoken, and idle observation is off.
 - Answers can run on Claude Code, Codex, Apple On-Device, or any command-line tool you configure; see [AI providers](docs/PROVIDERS.md).
 
-The interface runs locally; AI inference on the default route runs remotely through your ChatGPT-backed Codex account.
+The interface runs locally; answers run remotely through the provider you choose, such as your Claude plan via Claude Code or your ChatGPT plan via Codex.
 No local LLM is required.
-The code is free under the MIT license, but provider access, subscription limits still apply.
+The code is free under the MIT license, but provider access and subscription limits still apply.
 
 ## Use it with a Codex conversation
 
@@ -49,19 +49,18 @@ The current project targets **macOS 26 or later** and was built with **Xcode 27*
 The runtime preparation script also supports Intel macOS archives; that hardware has not been validated for this project.
 
 ```sh
-git clone https://github.com/OuterCFO/openclicky.git
-cd openclicky
-python3 scripts/prepare-codex-runtime.py
-cp Config/Local.xcconfig.example Config/Local.xcconfig
-open cursor-buddy.xcodeproj
+git clone https://github.com/OuterCFO/screen-companion.git
+cd screen-companion
+scripts/setup.sh
 ```
 
-1. Put your own Apple development team ID in `Config/Local.xcconfig`.
-2. In Xcode, choose the `cursor-buddy` scheme and **My Mac**, then build.
-3. Copy the signed `OpenClicky.app` build product to `/Applications` and launch that copy.
-4. Sign in to Codex with your own ChatGPT account, or let OpenClicky's sign-in flow complete.
-5. Grant Screen Recording and Accessibility to the installed OpenClicky app.
-6. Install [OpenSuperWhisper](https://github.com/Starmel/OpenSuperWhisper), set its recording shortcut, and turn off Hold to record.
+`scripts/setup.sh` checks macOS and Xcode, writes `Config/Local.xcconfig` with your signing team and bundle ID, downloads the pinned Codex runtime (skip with `--no-codex`), and opens the project.
+
+1. In Xcode, choose the `cursor-buddy` scheme and **My Mac**, then press Command+B.
+2. Copy the built `OpenClicky.app` from Products to `/Applications` and launch that copy.
+3. Grant Screen Recording and Accessibility to the installed OpenClicky app.
+4. Choose a model in Settings: a Claude model uses your signed-in `claude` CLI; a Codex model uses your ChatGPT sign-in.
+5. Optional: install [OpenSuperWhisper](https://github.com/Starmel/OpenSuperWhisper), set its recording shortcut, and turn off Hold to record.
 
 See [the complete setup guide](docs/SETUP.md), including sign-in, permissions, signing, and a first-use checklist.
 You can type instead of using local dictation.
@@ -94,7 +93,7 @@ An [interactive visual explainer](docs/interactive/OpenClicky-explained.html) is
 That explainer describes the inspected development setup, not every future user's configuration.
 
 The app includes OpenAI/Codex, Claude, Apple, and other upstream adapters.
-This project's verified setup uses ChatGPT-backed Codex.
+The maintainer's verified setup uses Claude Code (Sonnet 5.5) and ChatGPT-backed Codex.
 Other providers need their own access and are not covered by a ChatGPT subscription.
 Screen guidance requires a backend capable of understanding the supplied images.
 

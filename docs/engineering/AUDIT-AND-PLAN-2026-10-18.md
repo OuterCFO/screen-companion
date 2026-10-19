@@ -117,6 +117,11 @@ Checks per phase: source checks, the full-target typecheck, a native Xcode build
 3. Add CI that runs the source checks on every push.
 4. Done when: a clean Mac can follow the README to a working build.
 
+Status 2026-10-19: steps 1 to 3 done.
+The bundle ID comes from `Config/Local.xcconfig`, `scripts/setup.sh` prepares a fresh clone, the update feed points here, and CI already ran the source checks on every push.
+The keychain service keeps the original prefix until a Phase 7 migration.
+A fresh clone passed `scripts/setup.sh`; a full build on a clean Mac has not been tested.
+
 ### Phase 7: Final name
 
 1. Choose a unique name and check it against existing products.

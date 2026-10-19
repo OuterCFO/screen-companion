@@ -13,7 +13,7 @@ OpenClicky is a macOS menu-bar companion app by Jason Kneen. It uses SwiftUI wit
 
 The product identity is OpenClicky:
 
-- Bundle identifier: `com.jkneen.openclicky`
+- Bundle identifier: `<OPENCLICKY_BUNDLE_ID_PREFIX>.openclicky`, set in the ignored `Config/Local.xcconfig`
 - Display name: `OpenClicky`
 - Copyright: Jason Kneen
 

@@ -13,6 +13,13 @@ Apple Silicon is the verified hardware path.
 Intel runtime download support exists but has not been validated end to end.
 The source repository is not a notarized installer.
 
+## Quick setup
+
+From the repository root, run `scripts/setup.sh`.
+It does the steps below for you: checks requirements, writes `Config/Local.xcconfig`, and prepares the Codex runtime.
+Options: `--team TEAM_ID`, `--bundle-prefix com.yourname`, `--no-codex` (Claude-only setups), `--no-open`.
+The rest of this guide explains each step.
+
 ## Prepare the runtime
 
 From the repository root:
@@ -46,11 +53,11 @@ cp Config/Local.xcconfig.example Config/Local.xcconfig
 open cursor-buddy.xcodeproj
 ```
 
-Replace `YOUR_TEAM_ID` in `Config/Local.xcconfig` with your development team identifier.
-That file is ignored by Git; shared project settings contain no maintainer signing team.
+Set `OPENCLICKY_DEVELOPMENT_TEAM` to your development team identifier and `OPENCLICKY_BUNDLE_ID_PREFIX` to a reverse-DNS prefix you own, such as `com.yourname`.
+The app's bundle ID becomes `<prefix>.openclicky`.
+That file is ignored by Git; shared project settings contain no personal signing team or bundle ID.
 Choose the `cursor-buddy` scheme, **My Mac**, and automatic signing in Xcode.
-If your account cannot provision the existing bundle/app-group identifiers, choose your own identifiers consistently for the app, widget, tests, entitlements, and app-group constants.
-The repository's identifiers are stable so macOS permissions do not change between normal builds.
+Keep the prefix stable: macOS ties Screen Recording and Accessibility permissions to the bundle ID, so changing it means granting them again.
 
 Use Xcode's Product → Build.
 Locate the built `OpenClicky.app` in Products and copy it to `/Applications`.
@@ -68,12 +75,12 @@ Enable only the features you intend to use.
 
 ## First-use check
 
-1. Launch the installed app and confirm normal menu bar icons appear, without the persistent fake notch or side dock.
+1. Launch the installed app and confirm one OpenClicky pointer appears in the menu bar, without a fake notch or side dock.
 2. Press and release Command + Option without another key.
 3. Dictate several sentences, or type if local dictation is unavailable.
 4. Confirm the editor wraps and grows, and a long prompt can be scrolled before submission.
 5. Submit a harmless public-page question and confirm input closes and the reply appears beside the AI pointer.
-6. Click the task menu bar icon and review the saved exchanges in the same panel.
+6. Open Tasks in the compact panel, or right-click the menu bar icon, and review the saved exchanges in the same panel.
 7. Send a follow-up and check it continues that session.
 8. Press Escape to dismiss the answer and highlights.
 
