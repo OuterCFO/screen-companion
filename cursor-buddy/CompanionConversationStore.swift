@@ -66,6 +66,17 @@ nonisolated struct CompanionConversationStore: Codable {
         activeID = id
         return true
     }
+    /// Archives chats untouched for `idle` (7 days by default), except the active one. History is kept.
+    mutating func archiveIdle(for idle: TimeInterval = 7 * 24 * 3600, now: Date = Date()) {
+        for index in conversations.indices where !conversations[index].archived && conversations[index].id != activeID {
+            let lastActivity = conversations[index].entries.last?.createdAt ?? .distantPast
+            if now.timeIntervalSince(lastActivity) > idle { conversations[index].archived = true }
+        }
+    }
+    /// Archives every chat except the active one. History is kept.
+    mutating func archiveAllButActive() {
+        for index in conversations.indices where conversations[index].id != activeID { conversations[index].archived = true }
+    }
     mutating func removeActive() {
         if let index = conversations.firstIndex(where: { $0.id == activeID }) { conversations[index].archived = true }
         if let next = conversations.last(where: { !$0.archived }) { activeID = next.id } else { startNew() }

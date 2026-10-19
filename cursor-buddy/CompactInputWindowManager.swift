@@ -9,10 +9,11 @@ final class CompactInputWindowManager {
                                taskChoices: [CompactTaskChoice] = [], selectTask: ((UUID) -> Void)? = nil,
                                loadHistory: CompactHistoryLoader? = nil, connectTask: (() -> Void)? = nil,
                                newTask: (() -> Void)? = nil, removeTask: (() -> Void)? = nil,
+                               clearOldTasks: (() -> Void)? = nil,
                                submit: @escaping (String) -> Void) {
         promptWindow.show(entries: entries, historyVisible: historyVisible, title: title, taskChoices: taskChoices,
                           selectTask: selectTask, loadHistory: loadHistory, connectTask: connectTask,
-                          newTask: newTask, removeTask: removeTask, submit: submit)
+                          newTask: newTask, removeTask: removeTask, clearOldTasks: clearOldTasks, submit: submit)
     }
 
     func showTextInput(accentTheme _: ClickyAccentTheme? = nil, submitText: @escaping (String) -> Void) {

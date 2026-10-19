@@ -6,6 +6,13 @@ typealias CompactHistoryLoader = @MainActor () async throws -> [CodexTranscriptE
 nonisolated struct CompactTaskChoice: Identifiable {
     let id: UUID
     let title: String
+    /// Chat, Working, Done, or Stopped.
+    var status = "Chat"
+    var lastActivity = Date.distantPast
+    var menuTitle: String { "\(status) · \(title)" }
+
+    /// The Tasks menu shows this many recent tasks; the rest go under Older.
+    static let recentLimit = 8
 }
 
 @MainActor
@@ -17,6 +24,7 @@ final class MenuBarPromptWindowManager {
               taskChoices: [CompactTaskChoice] = [], selectTask: ((UUID) -> Void)? = nil,
               loadHistory: CompactHistoryLoader? = nil, connectTask: (() -> Void)? = nil,
               newTask: (() -> Void)? = nil, removeTask: (() -> Void)? = nil,
+              clearOldTasks: (() -> Void)? = nil,
               submit: @escaping (String) -> Void) {
         if let application = NSWorkspace.shared.frontmostApplication,
            application.processIdentifier != ProcessInfo.processInfo.processIdentifier {
@@ -36,7 +44,7 @@ final class MenuBarPromptWindowManager {
         }
         guard let panel else { return }
         panel.contentView = NSHostingView(rootView: MenuBarPromptView(
-            entries: entries, historyVisible: historyVisible, title: title, taskChoices: taskChoices, selectTask: selectTask, loadHistory: loadHistory, connectTask: connectTask, newTask: newTask, removeTask: removeTask,
+            entries: entries, historyVisible: historyVisible, title: title, taskChoices: taskChoices, selectTask: selectTask, loadHistory: loadHistory, connectTask: connectTask, newTask: newTask, removeTask: removeTask, clearOldTasks: clearOldTasks,
             submit: { [weak self] text in self?.dismiss(); submit(text) },
             cancel: { [weak self] in self?.dismiss() },
             resize: { [weak self] height in self?.resize(to: height) }
@@ -80,6 +88,7 @@ private struct MenuBarPromptView: View {
     let connectTask: (() -> Void)?
     let newTask: (() -> Void)?
     let removeTask: (() -> Void)?
+    let clearOldTasks: (() -> Void)?
     let submit: (String) -> Void
     let cancel: () -> Void
     let resize: (CGFloat) -> Void
@@ -138,7 +147,20 @@ private struct MenuBarPromptView: View {
                 Spacer(minLength: 4)
                 if let selectTask {
                     Menu("Tasks") {
-                        ForEach(taskChoices) { task in Button(task.title) { selectTask(task.id) } }
+                        ForEach(taskChoices.prefix(CompactTaskChoice.recentLimit)) { task in
+                            Button(task.menuTitle) { selectTask(task.id) }
+                        }
+                        if taskChoices.count > CompactTaskChoice.recentLimit {
+                            Menu("Older (\(taskChoices.count - CompactTaskChoice.recentLimit))") {
+                                ForEach(taskChoices.dropFirst(CompactTaskChoice.recentLimit)) { task in
+                                    Button(task.menuTitle) { selectTask(task.id) }
+                                }
+                            }
+                        }
+                        if let clearOldTasks, taskChoices.count > 1 {
+                            Divider()
+                            Button("Clear old tasks (keeps current and running)", action: clearOldTasks)
+                        }
                     }.menuStyle(.borderlessButton).fixedSize()
                 }
                 if !historyVisible { Button("History") { historyVisible = true } }

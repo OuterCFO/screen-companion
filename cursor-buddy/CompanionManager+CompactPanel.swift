@@ -54,6 +54,7 @@ extension CompanionManager {
     }
     func refreshCompanionTaskIcons() {
         companionConversations.collapseDuplicateLinks()
+        companionConversations.archiveIdle()
         companionConversations.save()
         let ids = Set(companionConversations.conversations.map(\.id))
         agentDockItems.removeAll { ids.contains($0.id) }
@@ -177,11 +178,14 @@ extension CompanionManager {
     }
     func presentCompactTask(entries: [CodexTranscriptEntry], historyVisible: Bool = false,
                                     title: String, submit: @escaping (String) -> Void) {
-        let choices = companionConversations.conversations.filter { !$0.archived }.map {
-            CompactTaskChoice(id: $0.id, title: $0.title)
-        } + codexAgentSessions.filter { $0.hasVisibleActivity && !archivedSessionIDs.contains($0.id) }.map {
-            CompactTaskChoice(id: $0.id, title: $0.title)
+        let chats = companionConversations.conversations.filter { !$0.archived }.map {
+            CompactTaskChoice(id: $0.id, title: $0.title, status: "Chat", lastActivity: $0.entries.last?.createdAt ?? .distantPast)
         }
+        let agents = codexAgentSessions.filter { $0.hasVisibleActivity && !archivedSessionIDs.contains($0.id) }.map {
+            CompactTaskChoice(id: $0.id, title: $0.title, status: Self.compactTaskStatus($0.status),
+                              lastActivity: $0.entries.last?.createdAt ?? $0.createdAt)
+        }
+        let choices = (chats + agents).sorted { $0.lastActivity > $1.lastActivity }
         let linkedID = boundCodexThreadID
         let historyLoader: CompactHistoryLoader?
         if let id = linkedID {
@@ -196,7 +200,27 @@ extension CompanionManager {
             loadHistory: historyLoader,
             connectTask: { [weak self] in self?.showCodexSessionConnectionPicker() },
             newTask: { [weak self] in self?.startNewCompactTask() },
-            removeTask: { [weak self] in self?.removeCurrentCompactTask() }, submit: submit)
+            removeTask: { [weak self] in self?.removeCurrentCompactTask() },
+            clearOldTasks: { [weak self] in self?.clearOldCompactTasks() }, submit: submit)
+    }
+    private static func compactTaskStatus(_ status: CodexAgentSessionStatus) -> String {
+        switch status {
+        case .starting, .running: "Working"
+        case .ready: "Done"
+        case .stopped, .failed: "Stopped"
+        }
+    }
+    /// Archives every chat and finished agent task except the one on screen. History is kept.
+    func clearOldCompactTasks() {
+        saveCompactConversation()
+        for session in codexAgentSessions where !archivedSessionIDs.contains(session.id)
+            && session.id != compactInputAgentSessionID && session.status != .starting && session.status != .running {
+            archiveSession(session.id, allowIncomplete: true)
+        }
+        companionConversations.archiveAllButActive()
+        refreshCompanionTaskIcons()
+        if let sessionID = compactInputAgentSessionID, showCompactConversationForAgentDockItem(sessionID) { return }
+        showTutorConversation()
     }
     func showTutorConversation() {
         compactInputAgentSessionID = nil

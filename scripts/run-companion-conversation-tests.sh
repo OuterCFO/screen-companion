@@ -55,6 +55,20 @@ precondition(SharedCodexSessionContract.needsInstructions(threadID: "existing-th
 precondition(SharedCodexSessionContract.userText("Okay, I found it.", screenLabels: []) == "Okay, I found it.")
 let screenshotPrompt = SharedCodexSessionContract.userText("Okay, I found it.", screenLabels: ["screen0 1280x800"])
 precondition(screenshotPrompt.contains("screen0 1280x800") && !screenshotPrompt.contains("cursor_reply") && !screenshotPrompt.contains("POINT:"))
+var tidy = CompanionConversationStore(legacyEntries: [CodexTranscriptEntry(role: .user, text: "stale", createdAt: Date(timeIntervalSinceNow: -8 * 86400))], summary: nil)
+let staleID = tidy.activeID
+tidy.startNew(); tidy.update(entries: [CodexTranscriptEntry(role: .user, text: "fresh")], summary: nil)
+let freshID = tidy.activeID
+tidy.startNew()
+tidy.archiveIdle()
+precondition(tidy.conversations.first(where: { $0.id == staleID })!.archived)
+precondition(!tidy.conversations.first(where: { $0.id == freshID })!.archived && !tidy.active.archived)
+precondition(tidy.select(freshID)); tidy.archiveIdle(for: 0)
+precondition(!tidy.active.archived && tidy.activeID == freshID)
+tidy.archiveAllButActive()
+precondition(tidy.conversations.filter { !$0.archived }.map(\.id) == [freshID])
+precondition(tidy.conversations.first(where: { $0.id == staleID })!.entries.first?.text == "stale")
+print("PASS: idle chats archive after 7 days, clear keeps only the current chat, history is retained")
 print("PASS: separate developer contract, acknowledged registration, version migration, and compact user input")
 store.conversations[store.conversations.count - 1].boundThreadID = "existing-thread"
 store.conversations[store.conversations.count - 1].boundThreadTitle = "Codex: original"
