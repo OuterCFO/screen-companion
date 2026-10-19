@@ -2066,7 +2066,7 @@ struct OpenClickySettingsView: View {
     }
 
     private func openFeedbackInbox() {
-        guard let url = URL(string: "https://github.com/jasonkneen/openclicky/issues") else { return }
+        guard let url = URL(string: "https://github.com/OuterCFO/screen-companion/issues") else { return }
         NSWorkspace.shared.open(url)
     }
 

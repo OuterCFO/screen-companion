@@ -1,2 +1,5 @@
-// Copy to Local.xcconfig and replace with your Apple development team ID.
+// Copy to Local.xcconfig (ignored by Git) and fill in your own values.
+// Your Apple development team ID: Xcode > Settings > Accounts, or developer.apple.com > Membership.
 OPENCLICKY_DEVELOPMENT_TEAM = YOUR_TEAM_ID
+// A reverse-DNS prefix you own, for example com.yourname. The app becomes <prefix>.openclicky.
+OPENCLICKY_BUNDLE_ID_PREFIX = com.yourname

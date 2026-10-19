@@ -1,3 +1,6 @@
 // Local signing belongs to each developer, never to the repository.
+// Set both values in Config/Local.xcconfig (copy Config/Local.xcconfig.example).
 OPENCLICKY_DEVELOPMENT_TEAM =
+// Reverse-DNS prefix you own; the app is <prefix>.openclicky. Changing it resets macOS permissions.
+OPENCLICKY_BUNDLE_ID_PREFIX = com.example
 #include? "Local.xcconfig"

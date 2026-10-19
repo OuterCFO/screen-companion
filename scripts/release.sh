@@ -43,9 +43,10 @@ cd "$(dirname "$0")/.."
 SCHEME="cursor-buddy"
 PROJECT="cursor-buddy.xcodeproj"
 APP_NAME="OpenClicky"
-BUNDLE_ID="com.jkneen.openclicky"
-TEAM_ID="SW75ZJJ5R6"
-SIGNING_IDENTITY="Developer ID Application: Jason Kneen (${TEAM_ID})"
+# Set these in your environment; they identify your signing account, not the project.
+BUNDLE_ID="${OPENCLICKY_BUNDLE_ID:?Set OPENCLICKY_BUNDLE_ID, for example com.yourname.openclicky}"
+TEAM_ID="${OPENCLICKY_TEAM_ID:?Set OPENCLICKY_TEAM_ID to your Apple team ID}"
+SIGNING_IDENTITY="${OPENCLICKY_SIGNING_IDENTITY:-Developer ID Application}"
 NOTARY_PROFILE="OpenClicky"
 EXPORT_OPTIONS="scripts/ExportOptions.plist"
 

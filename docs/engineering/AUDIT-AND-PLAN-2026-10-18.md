@@ -3,7 +3,7 @@
 Date: 18 October 2026.
 Revision audited: 8152597 plus the older uncommitted shared-contract and dashboard changes.
 Method: code reading, a full-target typecheck against Xcode's built modules, the project's source checks, and the app's own logs from 5 to 18 October 2026.
-The June reviews (`CODE_REVIEW.md`, `OPENCLICKY_ARCHITECTURE_REVIEW.md`, `docs/FULL_SYSTEM_CODE_REVIEW_2026-06.md`) were re-checked; many of their findings were fixed on 23 June and are not repeated here.
+The June reviews (now in `docs/history/`) were re-checked; many of their findings were fixed on 23 June and are not repeated here.
 
 ## Goal
 

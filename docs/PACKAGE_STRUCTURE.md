@@ -1,7 +1,7 @@
 # OpenClicky Package Structure
 
 Current as of 2026-09-01. Supersedes the package inventory in
-`PACKAGE_EXTRACTION_AUDIT.md` and `PACKAGE_EXTRACTION_AUDIT_2026-09.md`,
+`history/PACKAGE_EXTRACTION_AUDIT.md` and `history/PACKAGE_EXTRACTION_AUDIT_2026-09.md`,
 which remain as the point-in-time analyses that produced this layout.
 
 ## Naming

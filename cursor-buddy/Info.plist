@@ -43,11 +43,11 @@
 	<key>SUAllowsAutomaticUpdates</key>
 	<true/>
 	<key>SUAutomaticallyUpdate</key>
-	<true/>
+	<false/>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/jasonkneen/openclicky/main/appcast.xml</string>
+	<string>https://raw.githubusercontent.com/OuterCFO/screen-companion/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>fXYcC2zX+zTEH0DVS8io8agfHtphoB9/o6J33T9FLdk=</string>
 	<key>SUScheduledCheckInterval</key>

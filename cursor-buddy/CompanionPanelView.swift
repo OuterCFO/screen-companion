@@ -1215,7 +1215,7 @@ struct CompanionPanelView: View {
     }
 
     private static func openFeedbackInbox() {
-        guard let url = URL(string: "https://github.com/jasonkneen/openclicky/issues") else {
+        guard let url = URL(string: "https://github.com/OuterCFO/screen-companion/issues") else {
             return
         }
         NSWorkspace.shared.open(url)

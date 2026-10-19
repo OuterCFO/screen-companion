@@ -5,7 +5,7 @@ nonisolated final class OpenClickyMessageLogStore: @unchecked Sendable {
 
     private let fileManager: FileManager
     private let lock = NSLock()
-    private let writeQueue = DispatchQueue(label: "com.jkneen.openclicky.message-log-writes", qos: .utility)
+    private let writeQueue = DispatchQueue(label: "openclicky.message-log-writes", qos: .utility)
 
     let logDirectory: URL
 

@@ -604,7 +604,7 @@ final class OpenClickyDirectActionMemoryStore: @unchecked Sendable {
     private let fileManager: FileManager
     private let memoryFile: URL
     private let lock = NSLock()
-    private let writeQueue = DispatchQueue(label: "com.jkneen.openclicky.direct-action-memory-writes", qos: .utility)
+    private let writeQueue = DispatchQueue(label: "openclicky.direct-action-memory-writes", qos: .utility)
     private var cachedMemory: OpenClickyDirectActionStoredMemory?
 
     init(fileManager: FileManager = .default, memoryFile: URL? = nil) {

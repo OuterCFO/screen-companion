@@ -286,6 +286,7 @@ nonisolated enum AppBundleConfiguration {
         return nil
     }
 
+    // Kept from the original project so saved keys survive; renamed with a migration in Phase 7.
     private static let keychainService = "com.jkneen.openclicky.secrets"
 
     private static let keychainBackedDefaultsKeys: Set<String> = [
