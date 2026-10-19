@@ -14,5 +14,5 @@ precondition(ExternalDictationShortcut.decode(#"{"carbonKeyCode":900,"carbonModi
 precondition(ExternalDictationShortcut.decode(#"{"carbonKeyCode":15,"carbonModifiers":0}"#) == nil)
 print("PASS: configured external dictation shortcut and malformed-setting rejection")
 SWIFT
-swiftc "$ROOT/cursor-buddy/OpenSuperWhisperDictation.swift" "$OUT/main.swift" -o "$OUT/check"
+swiftc "$ROOT/cursor-buddy/OpenSuperWhisperDictation.swift" "$ROOT/cursor-buddy/DictationPasteCapture.swift" "$OUT/main.swift" -o "$OUT/check"
 "$OUT/check"

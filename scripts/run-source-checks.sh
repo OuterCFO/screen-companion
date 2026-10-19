@@ -23,3 +23,5 @@ bash "$ROOT/scripts/run-reply-markdown-tests.sh"
 bash "$ROOT/scripts/run-external-dictation-tests.sh"
 
 bash "$ROOT/scripts/run-voice-routing-tests.sh"
+
+bash "$ROOT/scripts/run-dictation-paste-tests.sh"

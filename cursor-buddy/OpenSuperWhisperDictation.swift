@@ -44,6 +44,7 @@ final class OpenSuperWhisperDictation {
         down.flags = shortcut.flags
         up.flags = shortcut.flags
         try Task.checkCancellation()
+        DictationPasteCapture.shared.start()
         down.post(tap: .cghidEventTap)
         // Always release the key even if the input is canceled during this delay.
         try? await Task.sleep(for: .milliseconds(80))

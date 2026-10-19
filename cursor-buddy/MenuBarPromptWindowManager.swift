@@ -67,6 +67,7 @@ final class MenuBarPromptWindowManager {
     }
 
     private func dismiss() {
+        DictationPasteCapture.shared.stop()
         panel?.orderOut(nil)
         previousApplication?.activate(options: [])
         previousApplication = nil
@@ -261,6 +262,15 @@ private struct CompactPromptEditor: NSViewRepresentable {
 }
 
 private final class FocusedPromptTextView: NSTextView {
+    /// Inserts the dictated text even when the paste is handled after OpenSuperWhisper restored the clipboard.
+    override func paste(_ sender: Any?) {
+        if let transcription = DictationPasteCapture.shared.takeTranscription() {
+            insertText(transcription, replacementRange: selectedRange())
+            return
+        }
+        super.paste(sender)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard let attachedWindow = window else { return }
