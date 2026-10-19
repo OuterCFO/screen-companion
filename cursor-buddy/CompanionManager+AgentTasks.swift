@@ -479,9 +479,9 @@ extension CompanionManager {
         return "OpenClicky started a background agent for: \(snippet). Keep this as part of the current voice conversation context."
     }
 
-    static func nextAgentDockAccentTheme(existingCount: Int) -> ClickyAccentTheme {
-        let accentThemes: [ClickyAccentTheme] = [.blue, .mint, .rose, .amber, .white]
-        return accentThemes[existingCount % accentThemes.count]
+    /// Every task uses the user's pointer color; the Tasks menu tells tasks apart by title and status.
+    static func nextAgentDockAccentTheme(existingCount _: Int) -> ClickyAccentTheme {
+        .current
     }
 
     func updateAgentDockItem(for sessionID: UUID, status: CodexAgentSessionStatus) {

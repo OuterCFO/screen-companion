@@ -34,6 +34,7 @@ final class MenuBarPanelManager: NSObject {
     private var contentResizeWorkItem: DispatchWorkItem?
     private var isPanelPinned = false
     private var themeObserver: NSObjectProtocol?
+    private var tasksObserver: NSObjectProtocol?
     private var glassBackdrop: OpenClickyLiquidGlassBackdropView?
 
     private let companionManager: CompanionManager
@@ -90,11 +91,23 @@ final class MenuBarPanelManager: NSObject {
                 guard let self else { return }
                 self.refreshThemeAppearance()
                 self.refreshGlassBackdropAccent()
+                self.refreshStatusIcon()
             }
+        }
+
+        tasksObserver = NotificationCenter.default.addObserver(
+            forName: .openClickyMenuBarTasksDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshStatusIcon() }
         }
     }
 
     deinit {
+        if let observer = tasksObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
         if let observer = themeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -121,23 +134,35 @@ final class MenuBarPanelManager: NSObject {
     // MARK: - Status Item
 
     private func createStatusItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         guard let button = statusItem?.button else { return }
 
-        button.toolTip = "OpenClicky"
-        button.image = makeClickyMenuBarIcon()
-        button.image?.isTemplate = true
+        refreshStatusIcon()
         button.action = #selector(statusItemClicked(_:))
         button.target = self
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
+    /// The only menu bar icon: the pointer in the user's cursor color, with a badge
+    /// for running agent tasks (count) or an unseen result (dot).
+    private func refreshStatusIcon() {
+        guard let button = statusItem?.button else { return }
+        let tasks = companionManager.agentMenuBarStatusManager
+        button.image = makeClickyMenuBarIcon(runningCount: tasks.runningCount, hasUnseenResult: tasks.hasUnseenResult)
+        button.image?.isTemplate = false
+        var tooltip = "OpenClicky"
+        if tasks.runningCount > 0 { tooltip += " · \(tasks.runningCount) working" }
+        if tasks.hasUnseenResult { tooltip += " · new result (right-click)" }
+        button.toolTip = tooltip
+    }
+
     /// Draws the clicky triangle as a menu bar icon. Uses the same shape
     /// and rotation as the in-app cursor so the menu bar icon matches.
-    private func makeClickyMenuBarIcon() -> NSImage {
+    private func makeClickyMenuBarIcon(runningCount: Int, hasUnseenResult: Bool) -> NSImage {
         let iconSize: CGFloat = 18
-        let image = NSImage(size: NSSize(width: iconSize, height: iconSize))
+        let accent = ClickyAccentTheme.current.nsColor
+        let image = NSImage(size: NSSize(width: runningCount > 0 ? iconSize + 8 : iconSize, height: iconSize))
         image.lockFocus()
 
         let triangleSize = iconSize * 0.7
@@ -162,8 +187,18 @@ final class MenuBarPanelManager: NSObject {
         path.line(to: rotate(bottomRight))
         path.close()
 
-        NSColor.black.setFill()
+        accent.setFill()
         path.fill()
+
+        if runningCount > 0 {
+            let label = NSAttributedString(string: runningCount > 9 ? "9+" : "\(runningCount)", attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold), .foregroundColor: accent
+            ])
+            label.draw(at: NSPoint(x: iconSize - 1, y: iconSize - label.size().height - 1))
+        } else if hasUnseenResult {
+            NSColor.systemRed.setFill()
+            NSBezierPath(ovalIn: NSRect(x: iconSize - 6, y: iconSize - 6, width: 5.5, height: 5.5)).fill()
+        }
 
         image.unlockFocus()
         return image
@@ -219,6 +254,8 @@ final class MenuBarPanelManager: NSObject {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
+        menu.addItem(.separator())
+        companionManager.agentMenuBarStatusManager.addTaskItems(to: menu)
         menu.addItem(.separator())
         menu.addItem(agentHistoryMenuItem())
 
@@ -442,71 +479,137 @@ final class MenuBarPanelManager: NSObject {
 
 }
 
-// MARK: - Agent Menu Bar Status Items
+// MARK: - Menu Bar Tasks
 
+extension Notification.Name {
+    static let openClickyMenuBarTasksDidChange = Notification.Name("openClickyMenuBarTasksDidChange")
+}
+
+/// Tracks screen conversations and agent tasks for the single menu bar icon:
+/// its badge (running count, unseen result) and the Tasks section of its menu.
 @MainActor
 final class AgentMenuBarStatusManager: NSObject {
-    private var statusItemsByItemID: [UUID: NSStatusItem] = [:]
-    private var latestItemsByID: [UUID: ClickyAgentDockItem] = [:]
+    private(set) var items: [ClickyAgentDockItem] = []
+    private var seenFinishedIDs: Set<UUID> = []
+    private var hasSynced = false
     private var syncTask: Task<Void, Never>?
-    private var activePopover: NSPopover?
     private weak var companionManager: CompanionManager?
+
+    var runningCount: Int { items.filter { $0.status == .starting || $0.status == .running }.count }
+    /// An agent finished since the user last looked at it.
+    var hasUnseenResult: Bool { items.contains { isFinishedAgent($0) && !seenFinishedIDs.contains($0.id) } }
 
     func scheduleSync(companionManager: CompanionManager) {
         syncTask?.cancel()
         syncTask = Task { [weak companionManager, weak self] in
             try? await Task.sleep(nanoseconds: 180_000_000)
-            await MainActor.run {
-                guard let self, let companionManager else { return }
-                self.sync(companionManager: companionManager)
-            }
+            guard !Task.isCancelled, let self, let companionManager else { return }
+            self.sync(companionManager: companionManager)
         }
     }
 
     func sync(companionManager: CompanionManager) {
         self.companionManager = companionManager
-        let visibleItems = menuBarItems(from: companionManager)
-        latestItemsByID = Dictionary(uniqueKeysWithValues: visibleItems.map { ($0.id, $0) })
+        items = Self.menuBarItems(from: companionManager)
+        // Results that were already finished at launch are not news.
+        if !hasSynced { seenFinishedIDs.formUnion(items.filter(isFinishedAgent).map(\.id)); hasSynced = true }
+        seenFinishedIDs.formIntersection(items.map(\.id))
+        NotificationCenter.default.post(name: .openClickyMenuBarTasksDidChange, object: self)
+    }
 
-        let visibleIDs = Set(visibleItems.map(\.id))
-        let staleIDs = statusItemsByItemID.keys.filter { !visibleIDs.contains($0) }
-        for itemID in staleIDs {
-            if let statusItem = statusItemsByItemID.removeValue(forKey: itemID) {
-                NSStatusBar.system.removeStatusItem(statusItem)
+    /// Adds the Tasks section (most recent first) to the menu bar icon's menu.
+    func addTaskItems(to menu: NSMenu) {
+        let header = NSMenuItem(title: items.isEmpty ? "No open tasks" : "Tasks", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        for item in items.reversed() {
+            let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let row = NSMenuItem(title: "\(statusLabel(for: item)) · \(title.isEmpty ? "Untitled task" : title)",
+                                 action: #selector(openTaskFromMenu(_:)), keyEquivalent: "")
+            row.target = self
+            row.representedObject = item.id
+            row.image = NSImage(systemSymbolName: symbolName(for: item), accessibilityDescription: nil)
+            if item.status == .starting || item.status == .running {
+                let submenu = NSMenu()
+                let open = NSMenuItem(title: "Open", action: #selector(openTaskFromMenu(_:)), keyEquivalent: "")
+                let stop = NSMenuItem(title: "Stop", action: #selector(stopTaskFromMenu(_:)), keyEquivalent: "")
+                for entry in [open, stop] { entry.target = self; entry.representedObject = item.id; submenu.addItem(entry) }
+                row.submenu = submenu
             }
+            menu.addItem(row)
         }
-
-        for item in visibleItems {
-            let statusItem = statusItemsByItemID[item.id] ?? makeStatusItem(for: item)
-            statusItemsByItemID[item.id] = statusItem
-            update(statusItem: statusItem, with: item)
+        if items.contains(where: isFinishedAgent) {
+            let clear = NSMenuItem(title: "Clear Finished Agent Tasks", action: #selector(clearFinishedFromMenu), keyEquivalent: "")
+            clear.target = self
+            menu.addItem(clear)
         }
     }
 
-    private func menuBarItems(from companionManager: CompanionManager) -> [ClickyAgentDockItem] {
+    private func isFinishedAgent(_ item: ClickyAgentDockItem) -> Bool {
+        item.sessionID != nil && (item.status == .done || item.status == .failed)
+    }
+
+    private func statusLabel(for item: ClickyAgentDockItem) -> String {
+        guard item.sessionID != nil else { return "Chat" }
+        switch item.status {
+        case .starting: return "Starting"
+        case .running: return "Working"
+        case .done: return seenFinishedIDs.contains(item.id) ? "Done" : "New result"
+        case .failed: return "Stopped"
+        }
+    }
+
+    private func symbolName(for item: ClickyAgentDockItem) -> String {
+        guard item.sessionID != nil else { return "bubble.left" }
+        switch item.status {
+        case .starting, .running: return "circle.dotted"
+        case .done: return seenFinishedIDs.contains(item.id) ? "checkmark.circle" : "checkmark.circle.fill"
+        case .failed: return "xmark.circle"
+        }
+    }
+
+    @objc private func openTaskFromMenu(_ sender: NSMenuItem) {
+        guard let itemID = sender.representedObject as? UUID, let companionManager else { return }
+        seenFinishedIDs.insert(itemID)
+        NotificationCenter.default.post(name: .openClickyMenuBarTasksDidChange, object: self)
+        if companionManager.showCompactConversationForAgentDockItem(itemID) { return }
+        if companionManager.agentDockItems.contains(where: { $0.id == itemID }) {
+            companionManager.openAgentDockItem(itemID)
+        } else {
+            companionManager.showAgentTask(items.first(where: { $0.id == itemID })?.sessionID)
+        }
+    }
+
+    @objc private func stopTaskFromMenu(_ sender: NSMenuItem) {
+        guard let itemID = sender.representedObject as? UUID, let companionManager else { return }
+        if companionManager.agentDockItems.contains(where: { $0.id == itemID }) {
+            companionManager.stopAgentDockItem(itemID)
+        } else if let sessionID = items.first(where: { $0.id == itemID })?.sessionID {
+            companionManager.stopCodexAgentSession(sessionID, reason: "agent_menu_bar_stop")
+        }
+    }
+
+    @objc private func clearFinishedFromMenu() {
+        guard let companionManager else { return }
+        for item in items where isFinishedAgent(item) { companionManager.dismissAgentDockItem(item.id) }
+        scheduleSync(companionManager: companionManager)
+    }
+
+    private static func menuBarItems(from companionManager: CompanionManager) -> [ClickyAgentDockItem] {
         var dockItemsBySessionID: [UUID: ClickyAgentDockItem] = [:]
         for item in companionManager.agentDockItems {
-            if let sessionID = item.sessionID {
-                dockItemsBySessionID[sessionID] = item
-            }
+            if let sessionID = item.sessionID { dockItemsBySessionID[sessionID] = item }
         }
-
         let sessionItems = companionManager.codexAgentSessions
-            .filter { session in
-                session.hasVisibleActivity && !companionManager.archivedSessionIDs.contains(session.id)
-            }
+            .filter { $0.hasVisibleActivity && !companionManager.archivedSessionIDs.contains($0.id) }
             .map { session -> ClickyAgentDockItem in
-                if let existingItem = dockItemsBySessionID[session.id] {
-                    return existingItem
-                }
-
-                return ClickyAgentDockItem(
+                dockItemsBySessionID[session.id] ?? ClickyAgentDockItem(
                     id: session.id,
                     sessionID: session.id,
                     title: session.title,
                     userInstruction: session.title,
                     accentTheme: session.accentTheme,
-                    status: Self.dockStatus(for: session.status),
+                    status: dockStatus(for: session.status),
                     progressStageLabel: session.progressStage.label,
                     progressStepText: session.latestActivityDisplaySummary ?? session.latestActivitySummary,
                     activityStatusLines: session.activityStatusLines,
@@ -515,411 +618,16 @@ final class AgentMenuBarStatusManager: NSObject {
                     createdAt: session.createdAt
                 )
             }
-
         let unsessionedItems = companionManager.agentDockItems.filter { $0.sessionID == nil }
-        let combinedItems = (sessionItems + unsessionedItems)
-            .sorted { $0.createdAt < $1.createdAt }
-
-        return Array(combinedItems.suffix(5))
+        return Array((sessionItems + unsessionedItems).sorted { $0.createdAt < $1.createdAt }.suffix(10))
     }
 
     private static func dockStatus(for status: CodexAgentSessionStatus) -> ClickyAgentDockStatus {
         switch status {
-        case .starting:
-            return .starting
-        case .running:
-            return .running
-        case .ready:
-            return .done
-        case .stopped, .failed:
-            return .failed
+        case .starting: return .starting
+        case .running: return .running
+        case .ready: return .done
+        case .stopped, .failed: return .failed
         }
-    }
-
-    private func makeStatusItem(for item: ClickyAgentDockItem) -> NSStatusItem {
-        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        if let button = statusItem.button {
-            button.identifier = NSUserInterfaceItemIdentifier(item.id.uuidString)
-            button.target = self
-            button.action = #selector(agentStatusItemClicked(_:))
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            button.imagePosition = .imageOnly
-        }
-        return statusItem
-    }
-
-    private func update(statusItem: NSStatusItem, with item: ClickyAgentDockItem) {
-        guard let button = statusItem.button else { return }
-        button.toolTip = tooltip(for: item)
-        button.image = makeAgentStatusIcon(theme: item.accentTheme, status: item.status)
-        button.image?.isTemplate = false
-        installDropTarget(on: button, itemID: item.id)
-    }
-
-    @objc private func agentStatusItemClicked(_ sender: NSStatusBarButton) {
-        guard let rawID = sender.identifier?.rawValue,
-              let itemID = UUID(uuidString: rawID),
-              let item = latestItemsByID[itemID] else { return }
-
-        handleAgentStatusItemClick(item: item, from: sender, isRightClick: NSApp.currentEvent?.type == .rightMouseUp)
-    }
-
-    private func handleAgentStatusItemClick(item: ClickyAgentDockItem, from sender: NSStatusBarButton, isRightClick: Bool) {
-        let itemID = item.id
-
-        if isRightClick {
-            showAgentContextMenu(for: item, from: sender)
-            return
-        }
-
-        if let activePopover, activePopover.isShown {
-            activePopover.performClose(nil)
-            if activePopover.contentViewController?.representedObject as? UUID == itemID {
-                return
-            }
-        }
-
-        guard let companionManager else { return }
-        if companionManager.showCompactConversationForAgentDockItem(itemID) { return }
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.animates = true
-        let rootView = ClickyAgentDockHoverCard(
-            item: item,
-            canOpenDashboard: companionManager.isAdvancedModeEnabled,
-            chat: { [weak self, weak companionManager] in
-                self?.openMenuBarAgent(item, companionManager: companionManager)
-            },
-            text: { [weak self, weak companionManager] in
-                self?.openMenuBarAgentTextFollowUp(item, companionManager: companionManager)
-            },
-            voice: { [weak companionManager] in
-                companionManager?.prepareVoiceFollowUpForAgentDockItem(item.id)
-            },
-            close: { [weak popover] in
-                popover?.performClose(nil)
-            },
-            stop: { [weak self, weak companionManager, weak popover] in
-                popover?.performClose(nil)
-                self?.stopMenuBarAgent(item, companionManager: companionManager)
-            },
-            dismiss: { [weak self, weak companionManager, weak popover] in
-                // Close == dismiss the finished item: hide the popover
-                // and remove the dock entry. dismissAgentDockItem is
-                // UI-only — it does NOT send a cancel signal (the agent
-                // is already terminal here).
-                popover?.performClose(nil)
-                self?.dismissMenuBarAgent(item, companionManager: companionManager)
-            },
-            runSuggestedAction: { [weak companionManager, weak popover] actionTitle in
-                popover?.performClose(nil)
-                companionManager?.runSuggestedNextAction(actionTitle, forAgentDockItem: item.id)
-            }
-        )
-        let controller = NSHostingController(rootView: rootView)
-        controller.representedObject = itemID
-        popover.contentViewController = controller
-        popover.contentSize = NSSize(width: 560, height: 360)
-        activePopover = popover
-        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
-    }
-
-    private func openMenuBarAgent(_ item: ClickyAgentDockItem, companionManager: CompanionManager?) {
-        guard let companionManager else { return }
-        if companionManager.agentDockItems.contains(where: { $0.id == item.id }) {
-            companionManager.openAgentDockItem(item.id)
-            return
-        }
-        if let sessionID = item.sessionID {
-            companionManager.showAgentTask(sessionID)
-            return
-        }
-        companionManager.showAgentTask(nil)
-    }
-
-    private func openMenuBarAgentTextFollowUp(_ item: ClickyAgentDockItem, companionManager: CompanionManager?) {
-        guard let companionManager else { return }
-        if companionManager.agentDockItems.contains(where: { $0.id == item.id }) {
-            companionManager.showTextFollowUpForAgentDockItem(item.id)
-            return
-        }
-        guard let sessionID = item.sessionID else { return }
-        companionManager.showTextFollowUpForAgentSession(sessionID)
-    }
-
-    private func stopMenuBarAgent(_ item: ClickyAgentDockItem, companionManager: CompanionManager?) {
-        guard let companionManager else { return }
-        if companionManager.agentDockItems.contains(where: { $0.id == item.id }) {
-            companionManager.stopAgentDockItem(item.id)
-            return
-        }
-        if let sessionID = item.sessionID {
-            companionManager.stopCodexAgentSession(sessionID, reason: "agent_menu_bar_stop")
-        }
-    }
-
-    private func dismissMenuBarAgent(_ item: ClickyAgentDockItem, companionManager: CompanionManager?) {
-        guard let companionManager else { return }
-        companionManager.dismissAgentDockItem(item.id)
-    }
-
-    private func installDropTarget(on button: NSStatusBarButton, itemID: UUID) {
-        let targetIdentifier = NSUserInterfaceItemIdentifier("OpenClickyAgentStatusDropTarget")
-        let dropTarget: AgentStatusItemDropTargetView
-
-        if let existing = button.subviews.first(where: { $0.identifier == targetIdentifier }) as? AgentStatusItemDropTargetView {
-            dropTarget = existing
-        } else {
-            dropTarget = AgentStatusItemDropTargetView(frame: button.bounds)
-            dropTarget.identifier = targetIdentifier
-            dropTarget.autoresizingMask = [.width, .height]
-            button.addSubview(dropTarget)
-        }
-
-        dropTarget.frame = button.bounds
-        dropTarget.configure(
-            itemID: itemID,
-            companionManager: companionManager,
-            clickHandler: { [weak self, weak button] itemID, isRightClick in
-                guard let self,
-                      let button,
-                      let item = self.latestItemsByID[itemID] else { return }
-                self.handleAgentStatusItemClick(item: item, from: button, isRightClick: isRightClick)
-            }
-        )
-    }
-
-    private func showAgentContextMenu(for item: ClickyAgentDockItem, from sender: NSStatusBarButton) {
-        let menu = NSMenu()
-
-        let quickItem = NSMenuItem(
-            title: "Quick Reply",
-            action: #selector(quickReplyToAgentFromMenu(_:)),
-            keyEquivalent: ""
-        )
-        quickItem.target = self
-        quickItem.representedObject = item.id
-        menu.addItem(quickItem)
-
-        let settingsItem = NSMenuItem(
-            title: "Settings",
-            action: #selector(openSettingsFromAgentMenu),
-            keyEquivalent: ""
-        )
-        settingsItem.target = self
-        menu.addItem(settingsItem)
-
-        menu.addItem(.separator())
-        menu.addItem(agentHistoryMenuItem())
-
-        menu.popUp(positioning: quickItem, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
-    }
-
-    private func agentHistoryMenuItem() -> NSMenuItem {
-        let historyItem = NSMenuItem(title: "Task History", action: nil, keyEquivalent: "")
-        let submenu = NSMenu(title: "Task History")
-        guard let companionManager else {
-            let emptyItem = NSMenuItem(title: "OpenClicky is not ready", action: nil, keyEquivalent: "")
-            emptyItem.isEnabled = false
-            submenu.addItem(emptyItem)
-            historyItem.submenu = submenu
-            return historyItem
-        }
-
-        let sessions = companionManager.codexAgentSessions.reversed()
-        if sessions.isEmpty {
-            let emptyItem = NSMenuItem(title: "No tasks yet", action: nil, keyEquivalent: "")
-            emptyItem.isEnabled = false
-            submenu.addItem(emptyItem)
-        } else {
-            for session in sessions {
-                let item = NSMenuItem(
-                    title: historyTitle(for: session),
-                    action: #selector(openHistorySessionFromAgentMenu(_:)),
-                    keyEquivalent: ""
-                )
-                item.target = self
-                item.representedObject = session.id
-                submenu.addItem(item)
-            }
-        }
-
-        historyItem.submenu = submenu
-        return historyItem
-    }
-
-    private func historyTitle(for session: CodexAgentSession) -> String {
-        let title = session.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallbackTitle = title.isEmpty ? "Untitled task" : title
-        return "\(statusLabel(for: session.status)) · \(fallbackTitle)"
-    }
-
-    private func statusLabel(for status: CodexAgentSessionStatus) -> String {
-        switch status {
-        case .starting: return "Starting"
-        case .running: return "Working"
-        case .ready: return "Done"
-        case .stopped: return "Stopped"
-        case .failed: return "Failed"
-        }
-    }
-
-    @objc private func quickReplyToAgentFromMenu(_ sender: NSMenuItem) {
-        guard let itemID = sender.representedObject as? UUID else { return }
-        if let item = latestItemsByID[itemID] {
-            openMenuBarAgentTextFollowUp(item, companionManager: companionManager)
-        } else {
-            companionManager?.showTextFollowUpForAgentDockItem(itemID)
-        }
-    }
-
-    @objc private func openSettingsFromAgentMenu() {
-        companionManager?.showSettingsWindow()
-    }
-
-    @objc private func openHistorySessionFromAgentMenu(_ sender: NSMenuItem) {
-        guard let sessionID = sender.representedObject as? UUID else { return }
-        companionManager?.showAgentTask(sessionID)
-    }
-
-    private func tooltip(for item: ClickyAgentDockItem) -> String {
-        let status: String
-        switch item.status {
-        case .starting: status = "Starting"
-        case .running: status = "Working"
-        case .done: status = "Done"
-        case .failed: status = "Stopped"
-        }
-        let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? "Agent: \(status)" : "Agent: \(status) — \(title)"
-    }
-
-    private func makeAgentStatusIcon(theme: ClickyAccentTheme, status: ClickyAgentDockStatus) -> NSImage {
-        let size: CGFloat = 18
-        let image = NSImage(size: NSSize(width: size, height: size))
-        image.lockFocus()
-        NSColor.clear.setFill()
-        NSRect(x: 0, y: 0, width: size, height: size).fill()
-
-        let accent = Self.nsColor(for: theme)
-        let center = CGPoint(x: size * 0.48, y: size * 0.50)
-
-        let triangleSize = size * 0.55
-        let height = triangleSize * sqrt(3.0) / 2.0
-        let top = CGPoint(x: center.x, y: center.y + height / 1.5)
-        let bottomLeft = CGPoint(x: center.x - triangleSize / 2, y: center.y - height / 3)
-        let bottomRight = CGPoint(x: center.x + triangleSize / 2, y: center.y - height / 3)
-        let angle = -35.0 * .pi / 180.0
-        func rotate(_ point: CGPoint) -> CGPoint {
-            let dx = point.x - center.x, dy = point.y - center.y
-            let cosA = CGFloat(cos(angle)), sinA = CGFloat(sin(angle))
-            return CGPoint(x: center.x + cosA * dx - sinA * dy, y: center.y + sinA * dx + cosA * dy)
-        }
-        let path = NSBezierPath()
-        path.move(to: rotate(top))
-        path.line(to: rotate(bottomLeft))
-        path.line(to: rotate(bottomRight))
-        path.close()
-        accent.setFill()
-        path.fill()
-
-        let dotColor: NSColor
-        switch status {
-        case .starting: dotColor = NSColor.systemBlue
-        case .running: dotColor = accent
-        case .done: dotColor = NSColor.systemGreen
-        case .failed: dotColor = NSColor.systemRed
-        }
-        dotColor.setFill()
-        NSBezierPath(ovalIn: NSRect(x: size - 6.2, y: size - 6.2, width: 5.4, height: 5.4)).fill()
-        NSColor.white.withAlphaComponent(0.55).setStroke()
-        let dotStroke = NSBezierPath(ovalIn: NSRect(x: size - 6.2, y: size - 6.2, width: 5.4, height: 5.4))
-        dotStroke.lineWidth = 0.7
-        dotStroke.stroke()
-
-        image.unlockFocus()
-        return image
-    }
-
-    private static func nsColor(for theme: ClickyAccentTheme) -> NSColor {
-        switch theme {
-        case .blue: return NSColor(calibratedRed: 0.20, green: 0.50, blue: 1.00, alpha: 1)
-        case .mint: return NSColor(calibratedRed: 0.21, green: 0.83, blue: 0.60, alpha: 1)
-        case .amber: return NSColor(calibratedRed: 0.98, green: 0.80, blue: 0.08, alpha: 1)
-        case .rose: return NSColor(calibratedRed: 1.00, green: 0.31, blue: 0.37, alpha: 1)
-        case .white: return NSColor(calibratedWhite: 0.97, alpha: 1)
-        case .cyan:
-            return NSColor(calibratedWhite: 0.97, alpha: 1)
-        case .lime:
-            return NSColor(calibratedWhite: 0.97, alpha: 1)
-        case .orange:
-            return NSColor(calibratedWhite: 0.97, alpha: 1)
-        case .violet:
-            return NSColor(calibratedWhite: 0.97, alpha: 1)
-        }
-    }
-}
-
-private final class AgentStatusItemDropTargetView: NSView {
-    private var itemID: UUID?
-    private weak var companionManager: CompanionManager?
-    private var clickHandler: ((UUID, Bool) -> Void)?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        registerForDraggedTypes([.fileURL, .URL])
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        registerForDraggedTypes([.fileURL, .URL])
-    }
-
-    func configure(
-        itemID: UUID,
-        companionManager: CompanionManager?,
-        clickHandler: @escaping (UUID, Bool) -> Void
-    ) {
-        self.itemID = itemID
-        self.companionManager = companionManager
-        self.clickHandler = clickHandler
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        guard let itemID else { return }
-        clickHandler?(itemID, false)
-    }
-
-    override func rightMouseUp(with event: NSEvent) {
-        guard let itemID else { return }
-        clickHandler?(itemID, true)
-    }
-
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        fileURLs(from: sender.draggingPasteboard).isEmpty ? [] : .copy
-    }
-
-    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        !fileURLs(from: sender.draggingPasteboard).isEmpty
-    }
-
-    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let itemID else { return false }
-        let urls = fileURLs(from: sender.draggingPasteboard)
-        guard !urls.isEmpty else { return false }
-        companionManager?.attachDroppedAgentFiles(urls, toAgentDockItem: itemID, source: "agent_menu_avatar_drop")
-        return true
-    }
-
-    private func fileURLs(from pasteboard: NSPasteboard) -> [URL] {
-        if let urls = pasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL], !urls.isEmpty {
-            return urls.map(\.standardizedFileURL)
-        }
-
-        let filenames = pasteboard.propertyList(forType: .fileURL) as? [String] ?? []
-        return filenames.map { URL(fileURLWithPath: $0).standardizedFileURL }
     }
 }

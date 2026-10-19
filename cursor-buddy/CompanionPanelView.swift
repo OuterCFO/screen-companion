@@ -12,7 +12,7 @@ import SwiftUI
 
 struct CompanionPanelView: View {
     @ObservedObject var companionManager: CompanionManager
-    @AppStorage(ClickyAccentTheme.userDefaultsKey) private var selectedAccentThemeID = ClickyAccentTheme.blue.rawValue
+    @AppStorage(ClickyAccentTheme.userDefaultsKey) private var selectedAccentThemeID = ClickyAccentTheme.mint.rawValue
     @AppStorage(ClickyCursorAvatarStyle.userDefaultsKey) private var avatarStyleRawValue = ClickyCursorAvatarStyle.default.storageValue
     @AppStorage(ClickyCursorAvatarSizePreference.userDefaultsKey) private var cursorAvatarSizeScale = ClickyCursorAvatarSizePreference.defaultScale
     @StateObject private var localSpeechModelManager = OpenClickyLocalSpeechModelManager.shared
@@ -1028,14 +1028,14 @@ struct CompanionPanelView: View {
                     in: ClickyCursorAvatarSizePreference.minScale...ClickyCursorAvatarSizePreference.maxScale
                 )
                 .controlSize(.small)
-                .tint((ClickyAccentTheme(rawValue: selectedAccentThemeID) ?? .blue).cursorColor)
+                .tint((ClickyAccentTheme(rawValue: selectedAccentThemeID) ?? .mint).cursorColor)
             }
         }
     }
 
     private func avatarTile(_ style: ClickyCursorAvatarStyle, label: String) -> some View {
         let isSelected = currentCursorAvatarStyle == style
-        let accent = (ClickyAccentTheme(rawValue: selectedAccentThemeID) ?? .blue).cursorColor
+        let accent = (ClickyAccentTheme(rawValue: selectedAccentThemeID) ?? .mint).cursorColor
 
         return Button(action: { avatarStyleRawValue = style.storageValue }) {
             ZStack {

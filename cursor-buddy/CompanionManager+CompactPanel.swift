@@ -60,7 +60,7 @@ extension CompanionManager {
         for task in companionConversations.conversations where !task.archived {
             agentDockItems.append(ClickyAgentDockItem(
                 id: task.id, sessionID: nil, title: task.title,
-                userInstruction: task.title, accentTheme: .mint, status: .done,
+                userInstruction: task.title, accentTheme: .current, status: .done,
                 progressStageLabel: "Ready", progressStepText: nil, activityStatusLines: [],
                 caption: task.entries.last(where: { $0.role == .assistant })?.text,
                 suggestedNextActions: [], createdAt: task.entries.first?.createdAt ?? Date()))

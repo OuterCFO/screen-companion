@@ -293,7 +293,7 @@ struct CodexHUDView: View {
     @ObservedObject var companionManager: CompanionManager
     @ObservedObject private var agentStore = OpenClickyAgentStore.shared
     @ObservedObject private var skillDiscoveryStore = OpenClickySkillDiscoveryStore.shared
-    @AppStorage(ClickyAccentTheme.userDefaultsKey) private var selectedAccentThemeID = ClickyAccentTheme.blue.rawValue
+    @AppStorage(ClickyAccentTheme.userDefaultsKey) private var selectedAccentThemeID = ClickyAccentTheme.mint.rawValue
     @AppStorage(AppBundleConfiguration.userAppFontDefaultsKey) private var appFontRawValue = OpenClickyResponseCaptionFont.fallback.rawValue
     @AppStorage(AppBundleConfiguration.userAppBoldTextDefaultsKey) private var appBoldTextEnabled = false
     @AppStorage(AppBundleConfiguration.userAppLineSpacingDefaultsKey) private var appLineSpacing = 2.0

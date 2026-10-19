@@ -136,8 +136,8 @@ public enum ClickyAccentTheme: String, CaseIterable, Identifiable {
 
 
     public static var current: ClickyAccentTheme {
-        let rawValue = UserDefaults.standard.string(forKey: userDefaultsKey) ?? ClickyAccentTheme.blue.rawValue
-        return ClickyAccentTheme(rawValue: rawValue) ?? .blue
+        let rawValue = UserDefaults.standard.string(forKey: userDefaultsKey) ?? ClickyAccentTheme.mint.rawValue
+        return ClickyAccentTheme(rawValue: rawValue) ?? .mint
     }
 }
 

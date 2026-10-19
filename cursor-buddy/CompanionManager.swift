@@ -790,13 +790,13 @@ final class CompanionManager: ObservableObject {
     var codexAgentSession: CodexAgentSession {
         codexAgentSessions.first { $0.id == activeCodexAgentSessionID }
             ?? codexAgentSessions.first
-            ?? CodexAgentSession(title: "Ask Agent", accentTheme: .blue)
+            ?? CodexAgentSession(title: "Ask Agent", accentTheme: .current)
     }
 
     private static func restoredArchivedSessions(from archivedSessionIDs: Set<UUID>) -> [CodexAgentSession] {
         ChatWorkspaceArchiveStore.loadSnapshots().compactMap { snapshot in
             guard archivedSessionIDs.contains(snapshot.id) else { return nil }
-            let accentTheme = ClickyAccentTheme(rawValue: snapshot.accentThemeRawValue) ?? .blue
+            let accentTheme = ClickyAccentTheme.current // One pointer color everywhere.
             let session = CodexAgentSession(id: snapshot.id, title: snapshot.title, accentTheme: accentTheme)
             session.restoreArchivedState(
                 entries: snapshot.entries,
@@ -810,7 +810,7 @@ final class CompanionManager: ObservableObject {
     private static func restoredInterruptedSessions(archivedSessionIDs: Set<UUID>) -> [CodexAgentSession] {
         ChatWorkspaceArchiveStore.loadRelaunchableSnapshots().compactMap { snapshot in
             guard !archivedSessionIDs.contains(snapshot.id) else { return nil }
-            let accentTheme = ClickyAccentTheme(rawValue: snapshot.accentThemeRawValue) ?? .blue
+            let accentTheme = ClickyAccentTheme.current // One pointer color everywhere.
             let session = CodexAgentSession(id: snapshot.id, title: snapshot.title, accentTheme: accentTheme)
             session.restoreInterruptedRelaunchState(
                 entries: snapshot.entries,
@@ -856,7 +856,7 @@ final class CompanionManager: ObservableObject {
             compactedVoiceConversationArchive = restoredVoiceArchive
         }
 
-        let initialAgentSession = CodexAgentSession(title: "Ask Agent", accentTheme: .blue)
+        let initialAgentSession = CodexAgentSession(title: "Ask Agent", accentTheme: .current)
         let restoredArchiveIDs = ChatWorkspaceArchiveStore.load()
         archivedSessionIDs = restoredArchiveIDs
         let restoredArchivedSessions = Self.restoredArchivedSessions(from: restoredArchiveIDs)

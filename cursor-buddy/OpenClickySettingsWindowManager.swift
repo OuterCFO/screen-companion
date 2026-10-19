@@ -182,7 +182,7 @@ struct OpenClickySettingsView: View {
     @StateObject private var localSpeechModelManager = OpenClickyLocalSpeechModelManager.shared
     @StateObject private var localModelDownloadService = OpenClickyLocalModelDownloadService.shared
     @StateObject private var localInferenceRuntime = OpenClickyLocalInferenceRuntimeManager.shared
-    @AppStorage(ClickyAccentTheme.userDefaultsKey) private var selectedAccentThemeID = ClickyAccentTheme.blue.rawValue
+    @AppStorage(ClickyAccentTheme.userDefaultsKey) private var selectedAccentThemeID = ClickyAccentTheme.mint.rawValue
     @AppStorage(ClickyCursorAvatarStyle.userDefaultsKey) private var avatarStyleRawValue = ClickyCursorAvatarStyle.default.storageValue
     @State private var userAnthropicAPIKey = ""
     @State private var codexAgentBaseURL = ""
@@ -2010,7 +2010,7 @@ struct OpenClickySettingsView: View {
 
     private func cursorAvatarButton(_ style: ClickyCursorAvatarStyle, label: String) -> some View {
         let isSelected = currentCursorAvatarStyle == style
-        let accent = (ClickyAccentTheme(rawValue: selectedAccentThemeID) ?? .blue).cursorColor
+        let accent = (ClickyAccentTheme(rawValue: selectedAccentThemeID) ?? .mint).cursorColor
 
         return Button {
             avatarStyleRawValue = style.storageValue

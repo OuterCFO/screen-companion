@@ -20,7 +20,7 @@ It is independent of the commercial Clicky product and of OpenAI.
   See [shared-session setup and limits](docs/SHARED-SESSIONS.md).
 - Connect can also continue a saved Claude Code session in place with `--resume`, and Claude response models run through your signed-in `claude` CLI.
   See [Claude Code setup and limits](docs/CLAUDE-CODE.md).
-- A task's menu bar icon opens its conversation history in the same panel.
+- One menu bar icon in your pointer color: a number shows running agent tasks, a red dot a new result. Right-click it for the Tasks list (open, stop, clear finished).
 - Follow-ups stay with the selected session; separate tasks have separate transcripts.
 - Answers appear beside the moving AI pointer, with optional screen highlights.
 - **Escape or ×** dismisses answers and highlights without deleting history.
@@ -75,7 +75,7 @@ You can type instead of using local dictation.
 | Press and release Fn + Command | Write text and paste it into the field that was focused |
 | Return or Send | Submit and close the input |
 | Shift + Return | Insert a newline |
-| History or a task menu bar icon | Review that conversation in the compact panel |
+| History, or right-click the menu bar icon → Tasks | Review that conversation in the compact panel |
 | Escape or × | Close the input, or dismiss the current answer and highlights |
 | Tools → New Agent Task | Start a separate background task on the agent model (Codex or Claude Code) |
 
