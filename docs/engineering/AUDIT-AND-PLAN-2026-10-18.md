@@ -99,7 +99,7 @@ Checks per phase: source checks, the full-target typecheck, a native Xcode build
 1. Remove the four unused areas listed under Decisions, separating the compact panel from the notch first.
 2. Done when: the app builds without them and the daily workflow is unchanged.
 
-### Phase 5: Split the central class (implemented 19 October; awaiting native build and live test)
+### Phase 5: Split the central class (done 19 October; built, installed, and live-tested as part of the 19 October builds)
 
 1. Move code out of `CompanionManager.swift` into focused coordinators: answer routing, tasks and sessions, computer use, agents, startup and permissions.
 2. Moves only, no behavior change, one coordinator per step with a typecheck after each.
