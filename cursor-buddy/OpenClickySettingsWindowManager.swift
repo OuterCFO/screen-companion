@@ -182,6 +182,7 @@ struct OpenClickySettingsView: View {
     @StateObject private var localSpeechModelManager = OpenClickyLocalSpeechModelManager.shared
     @StateObject private var localModelDownloadService = OpenClickyLocalModelDownloadService.shared
     @StateObject private var localInferenceRuntime = OpenClickyLocalInferenceRuntimeManager.shared
+    @AppStorage(CursorResponseContract.detailedAnswersDefaultsKey) private var detailedAnswers = false
     @AppStorage(ClickyAccentTheme.userDefaultsKey) private var selectedAccentThemeID = ClickyAccentTheme.mint.rawValue
     @AppStorage(ClickyCursorAvatarStyle.userDefaultsKey) private var avatarStyleRawValue = ClickyCursorAvatarStyle.default.storageValue
     @State private var userAnthropicAPIKey = ""
@@ -773,6 +774,13 @@ struct OpenClickySettingsView: View {
                     selectedModelID: companionManager.selectedModel,
                     columns: 3,
                     select: { companionManager.setSelectedModel($0) }
+                )
+
+                toggleRow(
+                    title: "Detailed answers",
+                    subtitle: "Write a full answer before the short reply. Slower; the full answer is in History.",
+                    systemImageName: "text.alignleft",
+                    isOn: $detailedAnswers
                 )
             }
 

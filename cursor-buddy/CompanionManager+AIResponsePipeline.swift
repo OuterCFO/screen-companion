@@ -710,7 +710,7 @@ extension CompanionManager {
             return try await sessionLink(for: threadID).submit(threadID: threadID, prompt: userPrompt,
                 images: images, onText: onTextChunk)
         }
-        let responseSystemPrompt = systemPrompt + "\n\n" + CursorResponseContract.instructions
+        let responseSystemPrompt = systemPrompt + "\n\n" + CursorResponseContract.current
         let requestedModelID = modelID ?? selectedModel
         let selectedVoiceResponseModel = OpenClickyModelCatalog.voiceResponseModel(withID: requestedModelID)
         return try await answerProviders.answer(AnswerRequest(

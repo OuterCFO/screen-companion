@@ -290,6 +290,12 @@ final class CompanionResponseOverlayManager {
 // MARK: - SwiftUI View
 
 private struct CompanionResponseOverlayView: View {
+    static func footer(verifiedTarget: Bool, detailed: Bool) -> String {
+        let target = verifiedTarget ? nil : "No verified screen target"
+        return (detailed ? ["Quick reply", "Full answer in History", target] : ["Quick reply", target])
+            .compactMap { $0 }.joined(separator: " · ")
+    }
+
     @ObservedObject var viewModel: CompanionResponseOverlayViewModel
 
     var body: some View {
@@ -310,7 +316,8 @@ private struct CompanionResponseOverlayView: View {
                 .accessibilityLabel("Dismiss coaching reply")
                 .help("Dismiss reply and highlights (Esc)")
             }
-            Text(viewModel.companion?.cursorOverlayState.replyHasVerifiedTarget == true ? "Quick reply · Full answer in History" : "Quick reply · No verified screen target")
+            Text(Self.footer(verifiedTarget: viewModel.companion?.cursorOverlayState.replyHasVerifiedTarget == true,
+                              detailed: UserDefaults.standard.bool(forKey: CursorResponseContract.detailedAnswersDefaultsKey)))
                 .font(.system(size: 10)).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 10)

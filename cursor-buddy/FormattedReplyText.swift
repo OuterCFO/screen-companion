@@ -174,12 +174,14 @@ nonisolated struct CursorReplyPresentation {
 
     init(_ source: String, requiresSummary: Bool = true) {
         full = source // Never rewrite the session's canonical answer.
-        let summary = Self.dedicatedSummary(CursorResponseContract.normalizePresentation(source))
-        hasSummary = summary != nil
-        compact = summary.map(Self.bounded) ?? (requiresSummary ? Self.unavailable : Self.bounded(source))
+        let replies = Self.dedicatedSummary(CursorResponseContract.normalizePresentation(source))
+        hasSummary = replies.closed != nil
+        // While streaming, show the reply as it is written; a closed reply always wins.
+        let summary = replies.closed ?? replies.open
+        compact = summary.map { Self.bounded($0) } ?? (requiresSummary ? Self.unavailable : Self.bounded(source, empty: ""))
     }
 
-    private static func dedicatedSummary(_ source: String) -> String? {
+    private static func dedicatedSummary(_ source: String) -> (closed: String?, open: String?) {
         let opening = "<cursor_reply>"
         let closing = "</cursor_reply>"
         var fence: String?
@@ -208,12 +210,18 @@ nonisolated struct CursorReplyPresentation {
                 collecting = nil
             }
         }
-        return latest // Incomplete streaming blocks are never displayed.
+        // An unclosed reply is still streaming: drop a half-written closing tag at its end.
+        let open = collecting?.replacingOccurrences(of: #"<(/[a-z_]*)?$"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (latest, open.flatMap { $0.isEmpty || $0.contains(opening) ? nil : $0 })
     }
 
-    private static func bounded(_ source: String) -> String {
-        var value = source.replacingOccurrences(of: #"\[POINT:[^\]\n]*\]"#, with: "", options: .regularExpression)
+    /// `empty` is shown when nothing displayable remains, such as a stream that has only sent its POINT line.
+    private static func bounded(_ source: String, empty: String = unavailable) -> String {
+        var value = source.replacingOccurrences(of: #"\[(POINT|AGENT):[^\]\n]*\]?"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"<[/a-z_]*$"#, with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty { return empty }
         let words = (try? NSRegularExpression(pattern: #"\S+"#))?.matches(in: value, range: NSRange(location: 0, length: (value as NSString).length)) ?? []
         if words.count > 60 {
             value = (value as NSString).substring(to: NSMaxRange(words[59].range)) + "…"

@@ -51,6 +51,27 @@ nonisolated enum CursorPointDirective {
 }
 
 nonisolated enum CursorResponseContract {
+    static let detailedAnswersDefaultsKey = "openClickyDetailedAnswers"
+
+    /// The format sent with each answer: the short reply only, unless Settings → Detailed answers is on.
+    static var current: String {
+        UserDefaults.standard.bool(forKey: detailedAnswersDefaultsKey) ? instructions : conciseInstructions
+    }
+
+    /// Short-only answers: the bubble is all the user reads, so the model writes nothing else.
+    static let conciseInstructions = """
+    MANDATORY OPENCLICKY RESPONSE FORMAT. This overrides older instructions about tag placement and answer length.
+    Every user-facing answer must START with a complete [POINT:x,y:label] directive on its own first line, optionally ending with :screenN inside the bracket. Use verified screenshot pixels, with origin at the top-left. If no target is verifiable or no screenshot is available, START with [POINT:none]. Never invent a target.
+    Then write ONLY the cursor reply: <cursor_reply> on its own line, the answer itself on the next line(s), and </cursor_reply> on its own line as the LAST nonempty line. Write nothing else before or after it: no full answer, no explanation, no preamble.
+    The cursor reply is the complete answer, at most 60 words and 600 characters. Lead with the answer or the next action. It renders Markdown: use **bold**, `code`, short bullet or numbered lists, or a short heading when they make steps easier to scan.
+    Do not put POINT or cursor_reply tags inline in prose, in a code fence, or in a quotation.
+    Required line order:
+    [POINT:x,y:label]
+    <cursor_reply>
+    The answer.
+    </cursor_reply>
+    """
+
     static let instructions = """
     MANDATORY OPENCLICKY RESPONSE FORMAT. This overrides older instructions about tag placement.
     Every user-facing answer must START with a complete [POINT:x,y:label] directive on its own first line, optionally ending with :screenN inside the bracket. Use verified screenshot pixels, with origin at the top-left. If no target is verifiable or no screenshot is available, START with [POINT:none]. Never invent a target.
