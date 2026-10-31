@@ -91,6 +91,7 @@ final class CompanionResponseOverlayManager {
         overlayPanel?.alphaValue = overlayViewModel.companion?.cursorOverlayState.aiPointerScreenLocation == nil ? 0 : 1
         repositionPanelNearCursor()
         overlayPanel?.orderFrontRegardless()
+        updateMouseInteractivity()
     }
 
     func updateStreamingText(_ accumulatedText: String) {
@@ -115,6 +116,7 @@ final class CompanionResponseOverlayManager {
         overlayViewModel.isShowingResponse = false
         overlayViewModel.streamingResponseText = ""
         overlayPanel?.orderOut(nil)
+        EscapeInterceptor.shared.setArmed(false)
         let wasVisible = isVisible
         isVisible = false
         if wasVisible {
@@ -140,8 +142,8 @@ final class CompanionResponseOverlayManager {
         responseOverlayPanel.isOpaque = false
         responseOverlayPanel.backgroundColor = .clear
         responseOverlayPanel.hasShadow = false
-        // The dismiss button needs mouse events; pointer tracking continues during hover.
-        responseOverlayPanel.ignoresMouseEvents = false
+        // Clicks pass through to the app underneath; only the × takes them, while the mouse is over it.
+        responseOverlayPanel.ignoresMouseEvents = true
         responseOverlayPanel.hidesOnDeactivate = false
         responseOverlayPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         responseOverlayPanel.isExcludedFromWindowsMenu = true
@@ -176,6 +178,7 @@ final class CompanionResponseOverlayManager {
         let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.repositionPanelNearCursor()
+                self?.updateMouseInteractivity()
             }
         }
         cursorTrackingTimer = timer
@@ -186,6 +189,14 @@ final class CompanionResponseOverlayManager {
         cursorTrackingTimer?.invalidate()
         cursorTrackingTimer = nil
         lastCursorTrackingOrigin = nil
+    }
+
+    private func updateMouseInteractivity() {
+        guard let overlayPanel else { return }
+        let overClose = ReplyBubblePlacement.closeButtonRect(panelFrame: overlayPanel.frame).contains(NSEvent.mouseLocation)
+        if overlayPanel.ignoresMouseEvents == overClose { overlayPanel.ignoresMouseEvents = !overClose }
+        // Escape is only held back while the user can actually see the bubble it closes.
+        EscapeInterceptor.shared.setArmed(isVisible && overlayPanel.isVisible && overlayPanel.alphaValue > 0)
     }
 
     private func repositionPanelNearCursor() {

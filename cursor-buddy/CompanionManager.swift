@@ -1072,6 +1072,9 @@ final class CompanionManager: ObservableObject {
 
         if currentlyHasAccessibility {
             globalPushToTalkShortcutMonitor.start()
+            EscapeInterceptor.shared.start { [weak self] in
+                MainActor.assumeIsolated { self?.handleEscapeKeyPressed() }
+            }
         } else {
             globalPushToTalkShortcutMonitor.stop()
         }
