@@ -29,7 +29,6 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
     private var isShiftTapStandaloneCandidate = false
     private var currentShiftTapPressDate: Date?
     private var lastStandaloneShiftTapDate: Date?
-    private var isEscapeCurrentlyPressed = false
     private let maximumShiftDoubleTapInterval: TimeInterval = 0.24
     private let maximumStandaloneShiftTapHoldDuration: TimeInterval = 0.18
     /// Mutated exclusively from the CGEvent tap callback, which runs on
@@ -137,6 +136,9 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
             if let globalEventTap {
                 CGEvent.tapEnable(tap: globalEventTap, enable: true)
             }
+            // Key events were dropped while the tap was off, so a half-finished
+            // Shift tap can no longer be trusted.
+            resetStandaloneShiftTapState(clearPreviousTap: true)
             return Unmanaged.passUnretained(event)
         }
 
@@ -149,7 +151,7 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
         }
 
         let eventKeyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-        handleEscapeKeyIfNeeded(eventType: eventType, keyCode: eventKeyCode)
+        handleEscapeKeyIfNeeded(eventType: eventType, keyCode: eventKeyCode, event: event)
 
         guard isActivationShortcutEnabled else {
             handleStandaloneShiftTapIfNeeded(eventType: eventType, event: event)
@@ -177,19 +179,15 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
         return Unmanaged.passUnretained(event)
     }
 
-    private func handleEscapeKeyIfNeeded(eventType: CGEventType, keyCode: UInt16) {
+    private func handleEscapeKeyIfNeeded(eventType: CGEventType, keyCode: UInt16, event: CGEvent) {
         let escapeKeyCode: UInt16 = 53
-        guard keyCode == escapeKeyCode else { return }
+        guard keyCode == escapeKeyCode, eventType == .keyDown else { return }
 
-        switch eventType {
-        case .keyDown where !isEscapeCurrentlyPressed:
-            isEscapeCurrentlyPressed = true
-            publishEscapeKeyPress()
-        case .keyUp:
-            isEscapeCurrentlyPressed = false
-        default:
-            break
-        }
+        // Ignore key-repeat events from holding Escape. Using the event's own
+        // autorepeat field avoids a "held" flag that could get stuck if the
+        // key-up is dropped while macOS has the tap disabled.
+        guard event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return }
+        publishEscapeKeyPress()
     }
 
     private func publishShortcutTransition(_ transition: BuddyPushToTalkShortcut.ShortcutTransition) {

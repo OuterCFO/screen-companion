@@ -734,11 +734,15 @@ final class BuddyDictationManager: NSObject, ObservableObject {
             ]
         )
 
+        // Callbacks from a provider session can arrive after that dictation ended
+        // (cancelled, fallback-finished, or replaced by a newer one). Ignore them
+        // so stale text never lands in a later dictation's draft.
+        let callbackDictationSessionID = activeDictationSessionID
         let activeTranscriptionSession = try await transcriptionProvider.startStreamingSession(
             keyterms: buildTranscriptionKeyterms(),
             onTranscriptUpdate: { [weak self] transcriptText in
                 Task { @MainActor in
-                    guard let self else { return }
+                    guard let self, self.activeDictationSessionID == callbackDictationSessionID else { return }
                     self.updateRecognizedText(transcriptText)
                     self.draftCallbacks?.updateDraftText(
                         self.composeDraftText(withTranscribedText: transcriptText)
@@ -747,7 +751,7 @@ final class BuddyDictationManager: NSObject, ObservableObject {
             },
             onFinalTranscriptReady: { [weak self] transcriptText in
                 Task { @MainActor in
-                    guard let self else { return }
+                    guard let self, self.activeDictationSessionID == callbackDictationSessionID else { return }
                     let finalTranscriptText = transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
                     let fallbackTranscriptText = self.latestNonEmptyRecognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
                     let usedPartialFallback = finalTranscriptText.isEmpty && !fallbackTranscriptText.isEmpty
@@ -773,7 +777,8 @@ final class BuddyDictationManager: NSObject, ObservableObject {
             },
             onError: { [weak self] error in
                 Task { @MainActor in
-                    self?.handleRecognitionError(error)
+                    guard let self, self.activeDictationSessionID == callbackDictationSessionID else { return }
+                    self.handleRecognitionError(error)
                 }
             }
         )

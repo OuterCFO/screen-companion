@@ -226,10 +226,18 @@ private final class OpenClickyParakeetTranscriptionSession: BuddyStreamingTransc
         targetSampleRate: Double(targetSampleRate)
     )
 
+    /// One lifecycle value instead of separate flags, so impossible mixes
+    /// (for example delivered and cancelled at once) cannot exist.
+    /// Read and written only on `stateQueue`.
+    private nonisolated enum Phase {
+        case collectingAudio
+        case transcribing
+        case delivered
+        case cancelled
+    }
+
     private var bufferedPCM16AudioData = Data()
-    private var hasRequestedFinalTranscript = false
-    private var hasDeliveredFinalTranscript = false
-    private var isCancelled = false
+    private var phase: Phase = .collectingAudio
     private var transcriptionTask: Task<Void, Never>?
 
     init(
@@ -251,17 +259,18 @@ private final class OpenClickyParakeetTranscriptionSession: BuddyStreamingTransc
         }
 
         stateQueue.async {
-            guard !self.hasRequestedFinalTranscript, !self.isCancelled else { return }
+            guard self.phase == .collectingAudio else { return }
             self.bufferedPCM16AudioData.append(audioPCM16Data)
         }
     }
 
     func requestFinalTranscript() {
         stateQueue.async {
-            guard !self.hasRequestedFinalTranscript, !self.isCancelled else { return }
-            self.hasRequestedFinalTranscript = true
+            guard self.phase == .collectingAudio else { return }
+            self.phase = .transcribing
 
             let bufferedPCM16AudioData = self.bufferedPCM16AudioData
+            self.bufferedPCM16AudioData.removeAll(keepingCapacity: false)
             self.transcriptionTask = Task { [weak self = self] in
                 await self?.transcribeBufferedAudio(bufferedPCM16AudioData)
             }
@@ -269,22 +278,23 @@ private final class OpenClickyParakeetTranscriptionSession: BuddyStreamingTransc
     }
 
     func cancel() {
+        // The task handle is written on stateQueue, so read and cancel it there too.
         stateQueue.async {
-            self.isCancelled = true
+            self.phase = .cancelled
             self.bufferedPCM16AudioData.removeAll(keepingCapacity: false)
+            self.transcriptionTask?.cancel()
+            self.transcriptionTask = nil
         }
+    }
 
-        transcriptionTask?.cancel()
+    private var isCancelled: Bool {
+        stateQueue.sync { phase == .cancelled }
     }
 
     private func transcribeBufferedAudio(_ bufferedPCM16AudioData: Data) async {
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, !isCancelled else { return }
 
-        let shouldStop = stateQueue.sync {
-            isCancelled || bufferedPCM16AudioData.isEmpty
-        }
-
-        if shouldStop {
+        if bufferedPCM16AudioData.isEmpty {
             deliverFinalTranscript("")
             return
         }
@@ -298,7 +308,7 @@ private final class OpenClickyParakeetTranscriptionSession: BuddyStreamingTransc
         do {
             var decoderState = await OpenClickyParakeetDecoderStateFactory.make(for: loadedModel.manager)
             let result = try await loadedModel.manager.transcribe(samples, decoderState: &decoderState)
-            guard !stateQueue.sync(execute: { isCancelled }) else { return }
+            guard !isCancelled else { return }
 
             let transcriptText = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !transcriptText.isEmpty {
@@ -307,7 +317,7 @@ private final class OpenClickyParakeetTranscriptionSession: BuddyStreamingTransc
 
             deliverFinalTranscript(transcriptText)
         } catch {
-            guard !stateQueue.sync(execute: { isCancelled }) else { return }
+            guard !isCancelled else { return }
             onError(error)
         }
     }
@@ -333,8 +343,14 @@ private final class OpenClickyParakeetTranscriptionSession: BuddyStreamingTransc
     }
 
     private func deliverFinalTranscript(_ transcriptText: String) {
-        guard !hasDeliveredFinalTranscript else { return }
-        hasDeliveredFinalTranscript = true
+        // Check-and-set on the queue so the transcript is delivered at most once
+        // and never after a cancel.
+        let shouldDeliver = stateQueue.sync { () -> Bool in
+            guard phase == .transcribing else { return false }
+            phase = .delivered
+            return true
+        }
+        guard shouldDeliver else { return }
         onFinalTranscriptReady(transcriptText)
     }
 
