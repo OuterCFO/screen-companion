@@ -18,12 +18,18 @@ nonisolated enum ClaudeCodeAgentProtocol {
     /// Agent turns load the user's own Claude Code settings, CLAUDE.md, skills, and MCP servers.
     /// `auto` lets Claude Code's safety checks approve actions unattended, matching how Codex agents run;
     /// restricted sessions may only edit files in their sandbox folder.
-    static func arguments(model: String, resumeSessionID: String?, restricted: Bool) -> [String] {
+    static func arguments(model: String, resumeSessionID: String?, restricted: Bool,
+                          appendedSystemPrompt: String = "") -> [String] {
         var arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json",
                          "--verbose", "--include-partial-messages", "--model", model,
                          "--permission-mode", restricted ? "acceptEdits" : "auto",
                          // Same rule as Codex agents: native app builds stay in Xcode.
                          "--disallowedTools", "Bash(xcodebuild:*)"]
+        // A specialist agent's soul, instructions and memory, which Codex gets as developer instructions.
+        let appended = appendedSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !appended.isEmpty {
+            arguments += ["--append-system-prompt", appended]
+        }
         if let resumeSessionID, ClaudeCodeCLIProtocol.isValidSessionID(resumeSessionID) {
             arguments += ["--resume", resumeSessionID]
         }

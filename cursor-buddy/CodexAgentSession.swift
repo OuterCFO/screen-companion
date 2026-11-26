@@ -814,7 +814,8 @@ final class CodexAgentSession: ObservableObject, Identifiable {
             let process = try ClaudeCodeCLITurnProcess(
                 executable: executable,
                 arguments: ClaudeCodeAgentProtocol.arguments(model: model, resumeSessionID: resumeID,
-                                                             restricted: usesRestrictedExecutionPolicy),
+                                                             restricted: usesRestrictedExecutionPolicy,
+                                                             appendedSystemPrompt: prependedSystemContext),
                 workingDirectory: URL(fileURLWithPath: workingDirectoryPath, isDirectory: true),
                 environment: ClaudeCodeCLIProtocol.environment(base: ProcessInfo.processInfo.environment, executable: executable,
                                                                maxOutputTokens: nil, customBaseURL: nil, customAPIKey: nil))

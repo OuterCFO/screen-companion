@@ -129,9 +129,13 @@ precondition(value(agentArgs, "--permission-mode") == "auto" && value(agentArgs,
 precondition(value(agentArgs, "--disallowedTools") == "Bash(xcodebuild:*)" && !agentArgs.contains("--setting-sources"))
 let restricted = A.arguments(model: "claude-opus-5-5", resumeSessionID: "019a-codex-thread", restricted: true)
 precondition(value(restricted, "--permission-mode") == "acceptEdits" && !restricted.contains("--resume"))
+precondition(!agentArgs.contains("--append-system-prompt"))
+let specialist = A.arguments(model: "claude-sonnet-5-5", resumeSessionID: id, restricted: false, appendedSystemPrompt: "  SOUL\n")
+precondition(value(specialist, "--append-system-prompt") == "SOUL" && value(specialist, "--resume") == id)
+precondition(!A.arguments(model: "claude-sonnet-5-5", resumeSessionID: nil, restricted: false, appendedSystemPrompt: " \n").contains("--append-system-prompt"))
 precondition(A.isClaudeAgentModel("claude-sonnet-5-5") && !A.isClaudeAgentModel("gpt-6-luna"))
 precondition(P.isLinkedThreadID(P.linkedThreadID(sessionID: id)) && !P.isLinkedThreadID(id))
-print("PASS: agent arguments, permission modes, resume, and xcodebuild block")
+print("PASS: agent arguments, permission modes, resume, specialist context, and xcodebuild block")
 
 // Recorded shape of a real agent turn: text, a shell tool call, a todo list, the final message, and the result
 var agent = A.Parser()
