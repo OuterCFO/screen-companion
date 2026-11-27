@@ -9,6 +9,7 @@ Cancellation never falls through, so an interrupted answer cannot start a paid f
 | Claude models | Claude Code CLI, then Anthropic API key | Claude plan, then per token |
 | OpenAI text models | Codex app-server, then OpenAI API key | ChatGPT plan, then per token |
 | Codex models | Codex app-server | ChatGPT plan |
+| Gemini 4 (Antigravity) | Antigravity CLI | Google plan; see [Antigravity](ANTIGRAVITY.md) |
 | Apple On-Device | Apple Foundation Models | Free, on this Mac |
 | Command-line tools | Your configured command | Set by the tool |
 

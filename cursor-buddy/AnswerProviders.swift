@@ -137,6 +137,7 @@ extension AnswerProviderRegistry {
         registry.register(.openAI, [codexProvider, OpenAIAPIAnswerProvider(api: openAIAPI)])
         registry.register(.codex, [codexProvider])
         registry.register(.apple, [AppleOnDeviceAnswerProvider()])
+        registry.register(.antigravity, [AntigravityAnswerProvider()])
         registry.register(.commandLine, [CommandLineAnswerProvider(configs: { CommandLineProviderConfig.load() })])
         return registry
     }

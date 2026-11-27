@@ -7,6 +7,8 @@ nonisolated enum OpenClickyModelProvider: String, Equatable {
     case codex
     /// A user-configured command-line tool; see `CommandLineProviderConfig`.
     case commandLine
+    /// Google's Antigravity CLI (`agy`) with the user's Google sign-in; see `AntigravityCLIProtocol`.
+    case antigravity
 
     var displayName: String {
         switch self {
@@ -20,6 +22,8 @@ nonisolated enum OpenClickyModelProvider: String, Equatable {
             return "Codex"
         case .commandLine:
             return "Command line"
+        case .antigravity:
+            return "Antigravity"
         }
     }
 
@@ -35,7 +39,7 @@ nonisolated enum OpenClickyModelProvider: String, Equatable {
             return .codex
         case .openAI:
             return .codex
-        case .commandLine:
+        case .commandLine, .antigravity:
             return nil
         }
     }
@@ -122,7 +126,13 @@ nonisolated enum OpenClickyModelCatalog {
     /// Command-line tools from the user's configuration file, read once at launch.
     static let commandLineModels: [OpenClickyModelOption] = CommandLineProviderConfig.load().map(\.modelOption)
 
-    static let voiceResponseModels: [OpenClickyModelOption] = builtInVoiceResponseModels + commandLineModels
+    /// Antigravity CLI models; offered only when `agy` is installed.
+    static let antigravityModels: [OpenClickyModelOption] = AntigravityCLIProtocol.findExecutable() == nil ? [] :
+        AntigravityCLIProtocol.models.map {
+            OpenClickyModelOption(id: $0.id, label: $0.label, provider: .antigravity, maxOutputTokens: 64_000)
+        }
+
+    static let voiceResponseModels: [OpenClickyModelOption] = builtInVoiceResponseModels + antigravityModels + commandLineModels
 
     static let builtInVoiceResponseModels: [OpenClickyModelOption] = [
         // Voice turns should still be concise by prompt, but never by a

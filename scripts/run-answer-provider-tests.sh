@@ -159,6 +159,7 @@ xcrun swiftc -parse-as-library -default-isolation MainActor -target "$(uname -m)
   "$ROOT/cursor-buddy/CommandLineProviderConfig.swift" \
   "$ROOT/cursor-buddy/CommandLineProvider.swift" \
   "$ROOT/cursor-buddy/ClaudeCodeCLIProtocol.swift" \
+  "$ROOT/cursor-buddy/AntigravityCLIProtocol.swift" \
   "$ROOT/cursor-buddy/LogRedactionPolicy.swift" \
   "$ROOT/cursor-buddy/ProviderErrorMessage.swift"
 "$OUT/answer_provider_tests"

@@ -26,7 +26,7 @@ It is independent of the commercial Clicky product and of OpenAI.
 - **Escape or ×** dismisses answers and highlights without deleting history.
 - No persistent fake-notch pill or side cursor dock.
 - Answers appear in the pointer bubble rather than being spoken, and idle observation is off.
-- Answers can run on Claude Code, Codex, Apple On-Device, or any command-line tool you configure; see [AI providers](docs/PROVIDERS.md).
+- Answers can run on Claude Code, Codex, Gemini 4 through the Antigravity CLI, Apple On-Device, or any command-line tool you configure; see [AI providers](docs/PROVIDERS.md) and [Antigravity](docs/ANTIGRAVITY.md).
 
 The interface runs locally; answers run remotely through the provider you choose, such as your Claude plan via Claude Code or your ChatGPT plan via Codex.
 No local LLM is required.

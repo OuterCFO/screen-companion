@@ -46,14 +46,17 @@ final class CommandLineAnswerProvider: AnswerProvider {
 @MainActor
 enum CommandLineRun {
     static func run(executable: URL, arguments: [String], standardInput: String?, workingDirectory: URL,
-                    timeout: Duration, onText: @MainActor @Sendable @escaping (String) -> Void) async throws -> String {
+                    timeout: Duration, environment: [String: String]? = nil,
+                    outputText: @MainActor @Sendable @escaping (Data) throws -> String = { String(decoding: $0, as: UTF8.self) },
+                    onText: @MainActor @Sendable @escaping (String) -> Void) async throws -> String {
         let process = Process()
         let output = Pipe(), errors = Pipe(), input = Pipe()
         process.executableURL = executable
         process.arguments = arguments
         process.currentDirectoryURL = workingDirectory
-        process.environment = ClaudeCodeCLIProtocol.environment(base: ProcessInfo.processInfo.environment, executable: executable,
-                                                                maxOutputTokens: nil, customBaseURL: nil, customAPIKey: nil)
+        process.environment = environment ?? ClaudeCodeCLIProtocol.environment(
+            base: ProcessInfo.processInfo.environment, executable: executable,
+            maxOutputTokens: nil, customBaseURL: nil, customAPIKey: nil)
         process.standardOutput = output
         process.standardError = errors
         process.standardInput = input
@@ -63,7 +66,7 @@ enum CommandLineRun {
             guard !data.isEmpty else { return }
             Task { @MainActor in
                 state.output.append(data)
-                if let text = String(data: state.output, encoding: .utf8) { onText(text) }
+                if let text = try? outputText(state.output), !text.isEmpty { onText(text) }
             }
         }
         errors.fileHandleForReading.readabilityHandler = { handle in
@@ -81,7 +84,13 @@ enum CommandLineRun {
                         output.fileHandleForReading.readabilityHandler = nil
                         errors.fileHandleForReading.readabilityHandler = nil
                         if let rest = try? output.fileHandleForReading.readToEnd() { state.output.append(rest) }
-                        let text = (String(data: state.output, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        let text: String
+                        do {
+                            text = try outputText(state.output).trimmingCharacters(in: .whitespacesAndNewlines)
+                        } catch {
+                            state.finish(.failure(error))
+                            return
+                        }
                         if status == 0, !text.isEmpty {
                             state.finish(.success(text))
                         } else {

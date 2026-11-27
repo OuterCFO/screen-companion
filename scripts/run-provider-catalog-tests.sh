@@ -184,6 +184,7 @@ xcrun swiftc -O -sdk "$SDK" -target "$TARGET" \
   "$ROOT/cursor-buddy/CodexRuntimeLocator.swift" \
   "$ROOT/cursor-buddy/OpenClickyProviderDiscovery.swift" \
   "$ROOT/cursor-buddy/ClaudeCodeCLIProtocol.swift" \
+  "$ROOT/cursor-buddy/AntigravityCLIProtocol.swift" \
   "$ROOT/cursor-buddy/CommandLineProviderConfig.swift" \
   "$ROOT/cursor-buddy/ReplyVisibilityPolicy.swift" \
   "$ROOT/cursor-buddy/ReplyBubblePlacement.swift" \

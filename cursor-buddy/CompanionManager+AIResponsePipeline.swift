@@ -941,7 +941,7 @@ extension CompanionManager {
             return .codexCLI
         case .openAI:
             return .openAIResponses
-        case .apple, .commandLine:
+        case .apple, .commandLine, .antigravity:
             return .unsupported
         }
     }
@@ -985,7 +985,7 @@ extension CompanionManager {
                 displayWidthInPoints: targetScreenCapture.displayWidthInPoints,
                 displayHeightInPoints: targetScreenCapture.displayHeightInPoints
             )
-        case .apple, .openAI, .commandLine:
+        case .apple, .openAI, .commandLine, .antigravity:
             return
         }
 
